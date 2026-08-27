@@ -267,6 +267,18 @@ Planned directions for future releases include:
 
 ---
 
+## 🎨 Custom Optimizations & Enhancements
+
+This personal fork includes dedicated fixes and visual improvements:
+- **CLI & OAuth Environment Discovery**: Enhanced automatic detection for Homebrew (`/opt/homebrew/bin`) and NVM-managed global Node/npm packages (`~/.nvm/versions/node/*/lib/node_modules` and `bin`), resolving Codex and Gemini CLI OAuth login issues under macOS GUI launch environments.
+- **Modernized Chat UI**:
+  - Redesigned readiness banner with frosted-glass card style and fixed button text wrapping.
+  - Upgraded prompt shortcuts to modern pill chips with subtle elevation and smooth hover micro-interactions.
+  - Unified composer card design with clean borderless textarea, removed distracting resize handles, and added soft breathing glow on focus.
+  - Enhanced send button with modern gradient and micro-bounce effects.
+
+---
+
 ## 🛠️ Development
 
 ```bash

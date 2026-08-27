@@ -1163,6 +1163,46 @@ function prependProcessPathEntries(entries: string[]): string[] {
   return merged;
 }
 
+function getNvmNodeDirs(): {
+  binDirs: string[];
+  globalModuleDirs: string[];
+} {
+  const binDirs: string[] = [];
+  const globalModuleDirs: string[] = [];
+  const home = homeDir();
+  if (!home) return { binDirs, globalModuleDirs };
+
+  // Scan ~/.nvm/versions/node/*/bin and ~/.nvm/versions/node/*/lib/node_modules
+  const nvmNodeBase = joinPath(home, ".nvm", "versions", "node");
+  try {
+    const baseFile = initLocalFile(nvmNodeBase);
+    if (baseFile?.exists() && baseFile.isDirectory()) {
+      const entries = (baseFile as any).directoryEntries;
+      while (entries?.hasMoreElements?.()) {
+        const entry = entries.getNext().QueryInterface(Ci.nsIFile);
+        if (entry.isDirectory()) {
+          const binPath = joinPath(entry.path, "bin");
+          if (isDirectoryPath(binPath)) binDirs.push(binPath);
+          const modPath = joinPath(entry.path, "lib", "node_modules");
+          if (isDirectoryPath(modPath)) globalModuleDirs.push(modPath);
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Also check Volta, fnm, pnpm
+  const voltaBin = joinPath(home, ".volta", "bin");
+  if (isDirectoryPath(voltaBin)) binDirs.push(voltaBin);
+  const fnmBin = joinPath(home, ".fnm", "current", "bin");
+  if (isDirectoryPath(fnmBin)) binDirs.push(fnmBin);
+  const pnpmBin = joinPath(home, "Library", "pnpm");
+  if (isDirectoryPath(pnpmBin)) binDirs.push(pnpmBin);
+
+  return { binDirs, globalModuleDirs };
+}
+
 function getCommonExecutableDirs(platform: SupportedPlatform): string[] {
   const home = homeDir();
   if (platform === "windows") {
@@ -1184,6 +1224,8 @@ function getCommonExecutableDirs(platform: SupportedPlatform): string[] {
     ).filter(isDirectoryPath);
   }
 
+  const { binDirs } = getNvmNodeDirs();
+
   if (platform === "macos") {
     return dedupePathEntries(
       [
@@ -1191,9 +1233,11 @@ function getCommonExecutableDirs(platform: SupportedPlatform): string[] {
         // legacy Intel /usr/local so a stale x64 node cannot win fallback lookup.
         "/opt/homebrew/bin",
         "/usr/local/bin",
-        "/usr/bin",
+        ...binDirs,
         home ? joinPath(home, ".local", "bin") : "",
         home ? joinPath(home, ".npm-global", "bin") : "",
+        "/usr/bin",
+        "/bin",
       ],
       platform,
     ).filter(isDirectoryPath);
@@ -1202,9 +1246,11 @@ function getCommonExecutableDirs(platform: SupportedPlatform): string[] {
   return dedupePathEntries(
     [
       "/usr/local/bin",
-      "/usr/bin",
+      ...binDirs,
       home ? joinPath(home, ".local", "bin") : "",
       home ? joinPath(home, ".npm-global", "bin") : "",
+      "/usr/bin",
+      "/bin",
     ],
     platform,
   ).filter(isDirectoryPath);
@@ -2080,10 +2126,11 @@ async function resolveProviderCliExecutablePath(
 ): Promise<string | null> {
   if (!spec) return null;
   if (provider === "openai-codex") {
-    return resolveExecutablePathInDirs(
+    const standalone = resolveExecutablePathInDirs(
       spec.executableName,
       getCodexStandaloneBinDirs(),
     );
+    if (standalone) return standalone;
   }
   return (
     (await locateExecutableViaShell(spec.executableName)) ||
@@ -3307,6 +3354,16 @@ async function getNpmGlobalRootCandidates(): Promise<string[]> {
     }
   }
 
+  // Include NVM and other package managers' global module dirs
+  try {
+    const { globalModuleDirs } = getNvmNodeDirs();
+    for (const modDir of globalModuleDirs) {
+      roots.add(modDir);
+    }
+  } catch {
+    // ignore
+  }
+
   return Array.from(roots).filter(Boolean);
 }
 
@@ -3423,10 +3480,14 @@ async function extractGeminiCliCredentials(): Promise<{
     const geminiPath =
       (await locateExecutableViaShell("gemini")) ||
       resolveExecutablePath("gemini");
-    if (geminiPath) {
+    const home = homeDir();
+    const hasExistingGeminiAuth = Boolean(
+      home && pathExists(joinPath(home, ".gemini", "oauth_creds.json")),
+    );
+    if (geminiPath || hasExistingGeminiAuth) {
       ztoolkit?.log?.(
         "AIdea: Gemini CLI found at",
-        geminiPath,
+        geminiPath || "(detected ~/.gemini/oauth_creds.json)",
         "— using bundled-CLI fallback credentials",
       );
       return {

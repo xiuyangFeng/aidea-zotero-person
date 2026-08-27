@@ -2279,18 +2279,26 @@
 }
 
 .llm-chat-readiness {
-  width: min(100%, 420px);
-  max-width: calc(100% - 24px);
+  width: min(100%, 440px);
+  max-width: calc(100% - 20px);
   box-sizing: border-box;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  border: 1px solid var(--stroke-secondary);
-  border-radius: 8px;
-  background: var(--material-background);
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--stroke-secondary));
+  border-radius: 14px;
+  background: linear-gradient(
+    135deg,
+    var(--material-background) 0%,
+    color-mix(in srgb, var(--color-accent) 5%, var(--material-background)) 100%
+  );
   color: var(--fill-secondary);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 10px 25px -5px rgba(0, 0, 0, 0.07),
+    0 4px 10px -2px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(8px);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .llm-chat-readiness[hidden] {
@@ -2317,42 +2325,55 @@
 
 .llm-chat-readiness-text {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .llm-chat-readiness-title {
   color: var(--fill-primary);
-  font-size: var(--llm-fs-12);
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: var(--llm-fs-13, 13px);
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
 .llm-chat-readiness-message {
-  margin-top: 2px;
+  margin-top: 3px;
   color: var(--fill-tertiary);
-  font-size: var(--llm-fs-11);
-  line-height: 1.4;
+  font-size: var(--llm-fs-11, 11px);
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .llm-chat-readiness-action {
   flex: 0 0 auto;
-  min-height: 28px;
-  max-width: 44%;
-  padding: 0 10px;
-  border: 1px solid var(--color-accent);
-  border-radius: 8px;
-  background: var(--color-accent);
+  min-height: 32px;
+  max-width: none;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 80%, #2563eb);
+  border-radius: 999px;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    color-mix(in srgb, var(--color-accent) 85%, #1d4ed8) 100%
+  );
   color: #ffffff;
-  font-size: var(--llm-fs-11);
+  font-size: var(--llm-fs-11, 11px);
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1;
   cursor: pointer;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-accent) 35%, transparent);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .llm-chat-readiness-action:hover {
-  filter: brightness(0.96);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.llm-chat-readiness-action:active {
+  transform: translateY(0);
 }
 
 .llm-panel[data-chat-readiness="empty"] #llm-chat-box .llm-welcome {
@@ -2416,9 +2437,9 @@
 .llm-shortcuts {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 0;
-  margin: 4px 0;
+  gap: 7px;
+  padding: 6px 0 8px;
+  margin: 4px 0 6px;
 }
 
 .llm-shortcut-btn {
@@ -2427,32 +2448,44 @@
   justify-content: center;
   position: relative;
   min-width: 0;
-  background: var(--fill-quinary);
-  border: 1px solid var(--stroke-secondary);
+  background: color-mix(in srgb, var(--fill-quinary) 70%, var(--material-background));
+  border: 1px solid color-mix(in srgb, var(--stroke-secondary) 85%, transparent);
   color: var(--fill-primary);
-  font-size: var(--llm-fs-11);
-  min-height: 30px;
+  font-size: var(--llm-fs-11, 11px);
+  font-weight: 500;
+  min-height: 28px;
   max-width: 100%;
-  padding: 6px 12px;
+  padding: 4px 13px;
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
   transition:
-    background 0.15s,
-    border-color 0.15s,
-    transform 0.12s ease,
-    opacity 0.12s ease;
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.18s ease,
+    opacity 0.15s ease;
 }
 
 .llm-shortcut-btn:hover:not(:disabled) {
-  background: var(--color-accent10);
-  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--material-background));
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  color: var(--color-accent);
+  transform: translateY(-1.5px);
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+.llm-shortcut-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .llm-shortcut-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -4586,15 +4619,27 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--llm-composer-gap);
+  gap: var(--llm-composer-gap, 6px);
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  padding: var(--llm-composer-padding-y) var(--llm-composer-padding-x);
-  border-radius: 16px;
+  padding: 10px 14px 8px;
+  border-radius: 18px;
   border: 1px solid var(--stroke-secondary);
   background: var(--material-background);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02);
   overflow: visible;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.llm-input-section:focus-within {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 16%, transparent),
+    0 8px 24px -4px rgba(0, 0, 0, 0.06);
 }
 
 .llm-input-section.llm-input-drop-active {
@@ -5347,30 +5392,34 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   z-index: 1;
   width: 100%;
   flex: 1 1 auto;
-  min-height: 60px;
+  min-height: 52px;
   font: inherit;
   font-size: var(--llm-composer-font-size);
   line-height: var(--llm-composer-line-height);
-  padding: var(--llm-composer-padding-y) var(--llm-composer-padding-x);
+  padding: 2px 2px 4px;
   box-sizing: border-box;
-  border-radius: 14px;
-  border: 1px solid var(--stroke-secondary);
-  background: var(--fill-quaternary);
+  border-radius: 0;
+  border: none !important;
+  background: transparent !important;
   color: var(--fill-primary);
-  transition: border-color 0.15s;
+  resize: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .llm-input:focus {
   outline: none;
-  border-color: var(--color-accent);
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .llm-input:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 .llm-input::placeholder {
   color: var(--fill-tertiary);
+  opacity: 0.85;
 }
 
 /* Actions Bar */
@@ -5676,6 +5725,21 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   font-size: 0;
   font-weight: 600;
   line-height: 0;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-accent) 28%, transparent);
+  transition:
+    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.18s ease,
+    filter 0.18s ease;
+}
+
+.llm-send-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  filter: brightness(1.06);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.llm-send-btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 #llm-send::before {
@@ -8195,18 +8259,24 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   );
 }
 
+.llm-panel[data-composer-theme-surface="true"] .llm-input-section:focus-within {
+  border-color: var(--llm-theme-accent, var(--color-accent));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--llm-theme-accent, var(--color-accent)) 16%, transparent),
+    0 8px 24px -4px rgba(0, 0, 0, 0.08);
+}
+
 .llm-panel[data-composer-theme-surface="true"] .llm-input {
   color: var(--llm-theme-input-fg, var(--fill-primary));
-  background: var(--llm-theme-input-bg, var(--fill-quaternary));
-  border-color: color-mix(
-    in srgb,
-    var(--llm-theme-border, var(--stroke-secondary)) 66%,
-    transparent
-  );
+  background: transparent !important;
+  border: none !important;
+  resize: none !important;
+  box-shadow: none !important;
 }
 
 .llm-panel[data-composer-theme-surface="true"] .llm-input:focus {
-  border-color: var(--llm-theme-accent, var(--color-accent));
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .llm-panel[data-composer-theme-surface="true"] .llm-input::placeholder {

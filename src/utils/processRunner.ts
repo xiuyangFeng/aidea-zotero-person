@@ -86,6 +86,16 @@ function getPlatform(): "windows" | "macos" | "linux" {
   return "linux";
 }
 
+function localPathExists(path: string): boolean {
+  try {
+    const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+    file.initWithPath(path);
+    return file.exists();
+  } catch {
+    return false;
+  }
+}
+
 function shellWrap(
   command: string,
   stdoutPath: string,
@@ -102,9 +112,30 @@ function shellWrap(
       args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
     };
   }
-  const script = `${command} 1> '${stdoutPath.replace(/'/g, "'\\''")}' 2> '${stderrPath.replace(/'/g, "'\\''")}'`;
+
+  // Ensure common tool directories (/opt/homebrew/bin, /usr/local/bin, ~/.local/bin)
+  // are included in PATH even when launched from macOS GUI / launchd.
+  let pathPrefix = "";
+  try {
+    const home =
+      (typeof Services !== "undefined" && Services?.env?.get?.("HOME")) || "";
+    const extraDirs = [
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      home ? `${home}/.local/bin` : "",
+    ].filter(Boolean);
+    pathPrefix = `export PATH="${extraDirs.join(":")}:$PATH"; `;
+  } catch {
+    // fallback
+  }
+
+  const script = `${pathPrefix}${command} 1> '${stdoutPath.replace(/'/g, "'\\''")}' 2> '${stderrPath.replace(/'/g, "'\\''")}'`;
+  const shellExe =
+    platform === "macos" && localPathExists("/bin/zsh")
+      ? "/bin/zsh"
+      : "/bin/bash";
   return {
-    exe: "/bin/bash",
+    exe: shellExe,
     args: ["-lc", script],
   };
 }
