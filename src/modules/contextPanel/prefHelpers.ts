@@ -186,6 +186,14 @@ export function getStringPref(key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+function setStringPref(key: string, value: string): void {
+  try {
+    Zotero.Prefs.set(`${config.prefsPrefix}.${key}`, value, true);
+  } catch {
+    /* ignore pref write failures */
+  }
+}
+
 export function getPanelTypographyBounds() {
   return PANEL_TYPOGRAPHY_BOUNDS;
 }
@@ -475,7 +483,6 @@ export function getSelectedProfileForItem(itemId: number): {
  */
 const KNOWN_OAUTH_PROVIDERS: ReadonlySet<string> = new Set([
   "openai-codex",
-  "google-gemini-cli",
   "github-copilot",
 ]);
 
@@ -548,17 +555,44 @@ function resolveModelCredentials(
   return null;
 }
 
-export function getAdvancedModelParamsForProfile(profileKey: ModelProfileKey): {
-  temperature: number;
-  maxTokens: number;
-} {
+export function getAdvancedModelParamsForProfile(
+  profileKey: ModelProfileKey,
+): { temperature?: number; maxTokens?: number } | undefined {
   const suffix = MODEL_PROFILE_SUFFIX[profileKey];
-  return {
-    temperature: normalizeTemperaturePref(
-      getStringPref(`temperature${suffix}`),
-    ),
-    maxTokens: normalizeMaxTokensPref(getStringPref(`maxTokens${suffix}`)),
-  };
+  const rawTemperature = getStringPref(`temperature${suffix}`).trim();
+  const rawMaxTokens = getStringPref(`maxTokens${suffix}`).trim();
+  const params: { temperature?: number; maxTokens?: number } = {};
+  if (rawTemperature) {
+    params.temperature = normalizeTemperaturePref(rawTemperature);
+  }
+  if (rawMaxTokens) {
+    params.maxTokens = normalizeMaxTokensPref(rawMaxTokens);
+  }
+  if (params.temperature === undefined && params.maxTokens === undefined) {
+    return undefined;
+  }
+  return params;
+}
+
+/**
+ * One-time cleanup: earlier releases shipped "0.3"/"4096" as the pref
+ * defaults (and Restore Defaults wrote them explicitly) even though no UI
+ * ever exposed these fields. An empty pref now means "let the provider
+ * decide", so clear the untouched factory pair to avoid silently capping
+ * every response at 4096 tokens.
+ */
+export function migrateLegacyAdvancedModelParamPrefs(): void {
+  for (const suffix of Object.values(MODEL_PROFILE_SUFFIX)) {
+    const temperatureKey = `temperature${suffix}`;
+    const maxTokensKey = `maxTokens${suffix}`;
+    if (
+      getStringPref(temperatureKey).trim() === "0.3" &&
+      getStringPref(maxTokensKey).trim() === "4096"
+    ) {
+      setStringPref(temperatureKey, "");
+      setStringPref(maxTokensKey, "");
+    }
+  }
 }
 
 export function applyPanelFontScale(panel: HTMLElement | null): void {

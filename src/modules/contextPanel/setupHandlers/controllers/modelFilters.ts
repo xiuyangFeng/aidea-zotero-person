@@ -4,7 +4,7 @@ import type { ModelChoice } from "./modelSelectionController";
 /**
  * Provider-specific model filter registry.
  *
- * Each key is a provider label (e.g., "Codex", "Gemini") matching the
+ * Each key is a provider label (e.g., "Codex", "Copilot") matching the
  * `provider` field on ModelChoice entries. The value is a filter function
  * that receives all choices belonging to that provider and returns the
  * subset that should be shown in the dropdown.

@@ -369,7 +369,7 @@ onDelta(token) → assistantMessage.text += token
 | `modelSelectionController.ts`      | 6KB   | 模型选择 & 持久化                     |
 | `conversationHistoryController.ts` | 2KB   | 会话历史管理                          |
 | `menuController.ts`                | 2KB   | 菜单状态控制                          |
-| `modelReasoningController.ts`      | 0.4KB | 推理模式判断                          |
+| `screenshotPolicyController.ts`    | 0.4KB | 按模型禁用截图                        |
 
 ---
 

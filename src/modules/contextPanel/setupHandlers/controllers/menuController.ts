@@ -1,5 +1,6 @@
 export const MODEL_MENU_OPEN_CLASS = "llm-model-menu-open";
 export const RETRY_MODEL_MENU_OPEN_CLASS = "llm-model-menu-open";
+export const REASONING_MENU_OPEN_CLASS = "llm-reasoning-menu-open";
 export const SLASH_MENU_OPEN_CLASS = "llm-slash-menu-open";
 
 const CONTEXT_MENU_Z_INDEX = "var(--llm-z-context-menu, 190)";

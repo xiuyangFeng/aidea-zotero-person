@@ -39,7 +39,7 @@ This folder implements the reader/library side-panel chat experience.
 - `setupHandlers/domRefs.ts`: centralized DOM query/typing helper for panel elements.
 - `setupHandlers/types.ts`: lightweight handler wiring types.
 - `setupHandlers/controllers/menuController.ts`: floating menu open-state and positioning primitives.
-- `setupHandlers/controllers/modelReasoningController.ts`: model-specific screenshot gating and reasoning label helpers.
+- `setupHandlers/controllers/screenshotPolicyController.ts`: model-specific screenshot gating (e.g. DeepSeek has no vision input).
 - `setupHandlers/controllers/conversationHistoryController.ts`: history row/title/date normalization and shared history types.
 - `setupHandlers/controllers/composeContextController.ts`: paper-context normalization and chip metadata formatting helpers.
 - `setupHandlers/controllers/fileIntakeController.ts`: file drag/paste/upload parsing and attachment ingestion pipeline.

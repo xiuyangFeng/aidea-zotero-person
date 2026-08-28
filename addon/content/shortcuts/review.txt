@@ -1,0 +1,1 @@
+Write a short literature review of the papers in context. Open with one paragraph on the research problem they share, then group them into themes and give each theme its own paragraph, citing every claim by first author and year. Close with the open questions and gaps these papers leave unresolved. Only discuss papers that appear in the provided context.

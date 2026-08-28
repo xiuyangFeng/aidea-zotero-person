@@ -11,6 +11,7 @@ import { buildUI } from "./buildUI";
 import { setupHandlers } from "./setupHandlers";
 import { ensureConversationLoaded, refreshChat } from "./chat";
 import { renderShortcuts } from "./shortcuts";
+import { resetManagedListeners } from "./managedListeners";
 import {
   ensureDocumentContext,
   resolveReaderDocument,
@@ -191,6 +192,9 @@ export function invalidateSharedReaderPanelForItem(
       }
     ).__llmHeightSync;
     heightSync?.dispose?.();
+    // Dispose document/window-level listeners from the previous bootstrap so
+    // they cannot fire against stale closures before the next one runs.
+    resetManagedListeners(state.host);
     state.hasBootstrapped = false;
     state.bootstrapPromise = null;
     // Clear stale file preview expansion for this item
@@ -208,6 +212,7 @@ export function removeReaderPanels(win: Window): void {
       }
     ).__llmHeightSync;
     heightSync?.dispose?.();
+    resetManagedListeners(state.host);
     state.host.remove();
   }
   map.clear();

@@ -1,5 +1,6 @@
 import type { PaperContextRef } from "./types";
 import { getZoteroItem } from "../../utils/zoteroItems";
+import { getDocumentAdapterForItem } from "./document/registry";
 
 export type PaperSearchAttachmentCandidate = {
   contextItemId: number;
@@ -82,12 +83,15 @@ function toModifiedTimestamp(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function isPdfAttachment(item: Zotero.Item | null | undefined): boolean {
-  return Boolean(
-    item &&
-    item.isAttachment?.() &&
-    item.attachmentContentType === "application/pdf",
-  );
+/** Any attachment AIdea can extract text from (PDF, EPUB, …). */
+function isReadableAttachment(item: Zotero.Item | null | undefined): boolean {
+  return Boolean(item?.isAttachment?.() && getDocumentAdapterForItem(item));
+}
+
+/** Short format label used when an attachment has no usable title. */
+function getAttachmentKindLabel(attachment: Zotero.Item): string {
+  const kind = getDocumentAdapterForItem(attachment)?.kind;
+  return kind ? kind.toUpperCase() : "File";
 }
 
 function getFieldText(item: Zotero.Item, field: string): string {
@@ -98,13 +102,13 @@ function getFieldText(item: Zotero.Item, field: string): string {
   }
 }
 
-function getPdfChildAttachments(item: Zotero.Item): Zotero.Item[] {
+function getReadableChildAttachments(item: Zotero.Item): Zotero.Item[] {
   const out: Zotero.Item[] = [];
   if (!item?.isRegularItem?.()) return out;
   const attachments = item.getAttachments();
   for (const attachmentId of attachments) {
     const attachment = getZoteroItem(attachmentId);
-    if (attachment && isPdfAttachment(attachment)) {
+    if (attachment && isReadableAttachment(attachment)) {
       out.push(attachment);
     }
   }
@@ -127,8 +131,9 @@ function resolveAttachmentTitle(
   if (title) return title;
   const filename = resolveAttachmentFilename(attachment);
   if (filename) return filename;
-  if (total > 1) return `PDF ${index + 1}`;
-  return "PDF";
+  const kindLabel = getAttachmentKindLabel(attachment);
+  if (total > 1) return `${kindLabel} ${index + 1}`;
+  return kindLabel;
 }
 
 function buildAttachmentCandidates(
@@ -171,11 +176,11 @@ function buildGroupCandidate(
 function buildStandaloneAttachmentCandidate(
   attachment: Zotero.Item,
 ): PaperSearchGroupCandidate | null {
-  if (!isPdfAttachment(attachment)) return null;
+  if (!isReadableAttachment(attachment)) return null;
   const title =
     getFieldText(attachment, "title") ||
     resolveAttachmentFilename(attachment) ||
-    `PDF ${attachment.id}`;
+    `${getAttachmentKindLabel(attachment)} ${attachment.id}`;
   const firstCreator =
     normalizeText(attachment.firstCreator) ||
     getFieldText(attachment, "firstCreator") ||
@@ -332,7 +337,7 @@ export async function searchPaperCandidates(
   const candidates: PaperSearchGroupCandidate[] = [];
 
   for (const item of items) {
-    if (isPdfAttachment(item)) {
+    if (isReadableAttachment(item)) {
       if (item.parentID || (excludeId && item.id === excludeId)) {
         continue;
       }
@@ -345,7 +350,7 @@ export async function searchPaperCandidates(
     }
 
     if (!item?.isRegularItem?.()) continue;
-    const contextAttachments = getPdfChildAttachments(item).filter(
+    const contextAttachments = getReadableChildAttachments(item).filter(
       (attachment) => !excludeId || attachment.id !== excludeId,
     );
     if (!contextAttachments.length) continue;

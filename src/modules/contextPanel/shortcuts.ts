@@ -133,6 +133,8 @@ export async function renderShortcuts(
       "key-points": i18n.keyPoints,
       methodology: i18n.methodology,
       limitations: i18n.limitations,
+      compare: i18n.compare,
+      review: i18n.literatureReview,
     };
     const i18nDefaultLabel = i18nLabelMap[shortcut.id] || shortcut.label;
     const labelText = (labelOverrides[shortcut.id] || i18nDefaultLabel).trim();

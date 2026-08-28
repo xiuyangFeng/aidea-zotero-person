@@ -22,11 +22,10 @@
   <strong>🌐 Website:</strong> <a href="https://visterainer.github.io/aidea-zotero/ko/">https://visterainer.github.io/aidea-zotero/ko/</a>
 </p>
 
-AIdea는 Zotero를 위한 무료 오픈소스 AI 연구 보조 플러그인입니다. 🔐 OpenAI (ChatGPT), Google Gemini, GitHub Copilot의 OAuth 로그인에 대응합니다. ⚙️ 또한 OpenAI 호환 API와 Ollama, LM Studio, vLLM 같은 환경을 통한 로컬 또는 자체 호스팅 모델 연결도 지원합니다. 여러 제공자 기반 대화, 문서 맥락 분석, 노트 내보내기, 메모리 기능, 전체 논문 번역을 Zotero 라이브러리 화면과 PDF 및 EPUB 리더 안으로 통합합니다.
+AIdea는 Zotero를 위한 무료 오픈소스 AI 연구 보조 플러그인입니다. 🔐 OpenAI (ChatGPT)와 GitHub Copilot의 OAuth 로그인에 대응합니다. ⚙️ 또한 OpenAI 호환 API와 Ollama, LM Studio, vLLM 같은 환경을 통한 로컬 또는 자체 호스팅 모델 연결도 지원합니다. 여러 제공자 기반 대화, 문서 맥락 분석, 노트 내보내기, 메모리 기능, 전체 논문 번역을 Zotero 라이브러리 화면과 PDF 및 EPUB 리더 안으로 통합합니다.
 
 <p align="center">
   <img alt="OpenAI ChatGPT" src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" />
-  <img alt="Google Gemini" src="https://img.shields.io/badge/Google-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img alt="GitHub Copilot" src="https://img.shields.io/badge/GitHub-Copilot-111111?style=for-the-badge&logo=github&logoColor=white" />
 </p>
 
@@ -87,9 +86,10 @@ AIdea는 논문과 전자책 읽기, 후속 질문, 발췌, 노트 정리, 선�
 | 방식                   | 인증                               | 설명                                                     |
 | ---------------------- | ---------------------------------- | -------------------------------------------------------- |
 | OpenAI (ChatGPT)       | Codex CLI 기반 OAuth               | 필요할 경우 플러그인이 Node.js 실행 환경을 자동으로 설치 |
-| Google Gemini          | 플러그인 내부 OAuth (PKCE)         | 필요할 경우 플러그인이 Node.js 실행 환경을 자동으로 설치 |
 | GitHub Copilot         | 플러그인 내부 OAuth (Device Code)  | 추가 Node.js 부트스트랩 불필요                           |
 | OpenAI 호환 엔드포인트 | API Base URL, 모델, 선택적 API Key | 로컬, 자체 호스팅, 서드파티 호환 서비스에 적합           |
+
+> **참고:** Google이 2026년 6월 18일에 개인 계정(Google AI Pro/Ultra 포함)의 Code Assist OAuth 접근을 종료함에 따라 Gemini CLI OAuth 지원이 제거되었습니다. Gemini 모델은 Gemini API 키를 사용해 임의의 OpenAI 호환 커스텀 엔드포인트를 통해, 또는 GitHub Copilot의 모델 카탈로그를 통해 계속 사용할 수 있습니다.
 
 ## 설치
 

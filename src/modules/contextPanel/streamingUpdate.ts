@@ -6,7 +6,13 @@
  * only the last assistant bubble is patched in place.
  */
 
-import { renderMarkdown } from "../../utils/markdown";
+import {
+  escapeHtml,
+  renderBlock,
+  renderMarkdown,
+  splitIntoBlocks,
+  type TextBlock,
+} from "../../utils/markdown";
 import { sanitizeText } from "./textUtils";
 
 // ---------------------------------------------------------------------------
@@ -16,8 +22,14 @@ import { sanitizeText } from "./textUtils";
 /** Default throttle interval (ms) for streaming patch updates. */
 const DEFAULT_PATCH_INTERVAL_MS = 30;
 
+/** Frame fallback (ms) when requestAnimationFrame is unavailable. */
+const FRAME_FALLBACK_INTERVAL_MS = 16;
+
 /** Default auto-scroll threshold (px from bottom). */
 const DEFAULT_AUTO_SCROLL_THRESHOLD = 64;
+
+/** Maximum number of finalized-message markdown renders kept cached. */
+const MARKDOWN_RENDER_CACHE_LIMIT = 200;
 
 // ---------------------------------------------------------------------------
 // DOM Lookup
@@ -78,8 +90,117 @@ export function findAssistantBubbleByMessageId(
 }
 
 // ---------------------------------------------------------------------------
-// Patch
+// Incremental streaming renderer
 // ---------------------------------------------------------------------------
+
+/**
+ * Per-content-container render state for incremental streaming.
+ *
+ * During streaming, text only grows at the end, so every complete block
+ * except the trailing one is immutable. We keep the stable prefix blocks in
+ * the DOM untouched and re-render only the trailing (unstable) block on each
+ * patch. `tailNodeCount` tracks how many trailing child nodes belong to that
+ * unstable block so the next patch can replace exactly those nodes.
+ */
+interface StreamingRenderState {
+  blockRaws: string[];
+  tailNodeCount: number;
+}
+
+const streamingRenderStates = new WeakMap<Element, StreamingRenderState>();
+
+/** Render a single markdown block with the same fallback as `renderMarkdown`. */
+function renderBlockSafe(block: TextBlock): string {
+  try {
+    return renderBlock(block);
+  } catch (err) {
+    console.warn("Markdown block render error:", err);
+    return `<div class="render-fallback">${escapeHtml(block.raw)}</div>`;
+  }
+}
+
+/**
+ * Incrementally render streaming markdown into `contentEl`.
+ *
+ * The first call clears `contentEl` and builds the block structure from
+ * scratch; later calls only append newly-stabilized blocks and re-render the
+ * trailing block. A full `renderMarkdown` pass happens once at finalize, so
+ * any block-boundary edge case is corrected when the message completes.
+ */
+function renderStreamingContentIncremental(
+  contentEl: HTMLDivElement,
+  safeText: string,
+): void {
+  let state = streamingRenderStates.get(contentEl);
+  if (!state) {
+    contentEl.textContent = "";
+    state = { blockRaws: [], tailNodeCount: 0 };
+    streamingRenderStates.set(contentEl, state);
+  }
+
+  const blocks = splitIntoBlocks(safeText);
+  if (!blocks.length) return;
+  const stableCount = blocks.length - 1;
+
+  // Longest still-valid prefix of already-rendered stable blocks. Append-only
+  // streaming normally keeps every stable block identical, but a partially
+  // streamed list item (e.g. a bare "- " line) can transiently split into its
+  // own paragraph block and later merge backwards — dropping the stable count.
+  // Only blocks from the first mismatch need re-rendering.
+  let matchCount = 0;
+  const maxMatch = Math.min(state.blockRaws.length, stableCount);
+  while (
+    matchCount < maxMatch &&
+    state.blockRaws[matchCount] === blocks[matchCount].raw
+  ) {
+    matchCount++;
+  }
+
+  // Drop DOM nodes for everything after the still-valid stable prefix:
+  // trailing tail nodes first, then any stable blocks that merged/changed.
+  while (contentEl.childNodes.length > matchCount) {
+    const last = contentEl.lastChild;
+    if (!last) break;
+    contentEl.removeChild(last);
+  }
+  state.tailNodeCount = 0;
+  state.blockRaws.length = matchCount;
+
+  // Append blocks that just became stable (everything before the last one).
+  for (let i = state.blockRaws.length; i < stableCount; i++) {
+    const html = renderBlockSafe(blocks[i]);
+    contentEl.insertAdjacentHTML("beforeend", html);
+    state.blockRaws.push(blocks[i].raw);
+  }
+
+  // Render the trailing unstable block, tracking how many nodes it produced
+  // so the next patch can replace exactly those.
+  const baseCount = contentEl.childNodes.length;
+  contentEl.insertAdjacentHTML(
+    "beforeend",
+    renderBlockSafe(blocks[blocks.length - 1]),
+  );
+  state.tailNodeCount = contentEl.childNodes.length - baseCount;
+}
+
+/**
+ * Find or create the stable content container inside a streaming bubble so
+ * the model name element and other structural children are not clobbered.
+ */
+function ensureStreamingContentEl(
+  bubble: HTMLDivElement,
+): HTMLDivElement | null {
+  const existing = bubble.querySelector(
+    "[data-streaming-content]",
+  ) as HTMLDivElement | null;
+  if (existing) return existing;
+  const doc = bubble.ownerDocument;
+  if (!doc) return null;
+  const contentEl = doc.createElement("div") as HTMLDivElement;
+  contentEl.setAttribute("data-streaming-content", "true");
+  bubble.appendChild(contentEl);
+  return contentEl;
+}
 
 /**
  * Incrementally update a streaming assistant bubble's content.
@@ -87,8 +208,9 @@ export function findAssistantBubbleByMessageId(
  * On the first call (when the skeleton is still visible), the skeleton is
  * removed and a content container (`[data-streaming-content]`) is created.
  *
- * On subsequent calls, only the content container's `innerHTML` is updated
- * via `renderMarkdown`.
+ * On subsequent calls, only newly-stabilized markdown blocks and the trailing
+ * block are re-rendered — completed paragraphs, code blocks, tables, and
+ * KaTeX math earlier in the message are left untouched in the DOM.
  *
  * If the bubble has been removed from the DOM (e.g. the user switched panels),
  * this function is a no-op.
@@ -115,23 +237,19 @@ export function patchStreamingBubble(
     skeleton.remove();
   }
 
-  // Find or create a stable content container so we don't clobber the model
-  // name element or any other structural children.
-  let contentEl = bubble.querySelector(
-    "[data-streaming-content]",
-  ) as HTMLDivElement | null;
-  if (!contentEl) {
-    const doc = bubble.ownerDocument;
-    if (!doc) return;
-    contentEl = doc.createElement("div") as HTMLDivElement;
-    contentEl.setAttribute("data-streaming-content", "true");
-    bubble.appendChild(contentEl);
-  }
+  const contentEl = ensureStreamingContentEl(bubble);
+  if (!contentEl) return;
 
   try {
-    contentEl.innerHTML = renderMarkdown(safeText);
+    renderStreamingContentIncremental(contentEl, safeText);
   } catch {
-    contentEl.textContent = safeText;
+    // Incremental path failed — fall back to a full render, then plain text.
+    streamingRenderStates.delete(contentEl);
+    try {
+      contentEl.innerHTML = renderMarkdown(safeText);
+    } catch {
+      contentEl.textContent = safeText;
+    }
   }
 }
 
@@ -140,12 +258,81 @@ export function patchStreamingBubble(
  *
  * - Removes the `streaming` CSS class (hides cursor animation)
  * - Removes any leftover skeleton
+ * - When `finalText` is provided, replaces the incrementally-rendered content
+ *   with the exact full `renderMarkdown` output and seeds the finalized
+ *   render cache so the following `refreshChat` does not re-render this
+ *   message's markdown/KaTeX.
  */
-export function finalizeStreamingBubble(bubble: HTMLDivElement | null): void {
+export function finalizeStreamingBubble(
+  bubble: HTMLDivElement | null,
+  finalText?: string,
+  cacheKey?: string | null,
+): void {
   if (!bubble) return;
   bubble.classList.remove("streaming");
   const skeleton = bubble.querySelector(".llm-streaming-skeleton");
   if (skeleton) skeleton.remove();
+
+  if (finalText == null) return;
+  const contentEl = bubble.querySelector(
+    "[data-streaming-content]",
+  ) as HTMLDivElement | null;
+  if (!contentEl) return;
+  streamingRenderStates.delete(contentEl);
+
+  const safeText = sanitizeText(finalText);
+  if (!safeText) return;
+  try {
+    const html = renderMarkdown(safeText);
+    if (cacheKey) putMarkdownRenderCache(cacheKey, safeText, html);
+    contentEl.innerHTML = html;
+  } catch {
+    contentEl.textContent = safeText;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Finalized markdown render cache
+// ---------------------------------------------------------------------------
+
+const markdownRenderCache = new Map<string, { text: string; html: string }>();
+
+function putMarkdownRenderCache(
+  cacheKey: string,
+  text: string,
+  html: string,
+): void {
+  const existing = markdownRenderCache.get(cacheKey);
+  if (existing) markdownRenderCache.delete(cacheKey);
+  markdownRenderCache.set(cacheKey, { text, html });
+  if (markdownRenderCache.size > MARKDOWN_RENDER_CACHE_LIMIT) {
+    const oldest = markdownRenderCache.keys().next().value;
+    if (oldest !== undefined) markdownRenderCache.delete(oldest);
+  }
+}
+
+/**
+ * Render an assistant message's markdown, reusing the cached HTML when the
+ * text is unchanged. `refreshChat` rebuilds every bubble after each response;
+ * the cache skips the expensive markdown+KaTeX pass for all messages that did
+ * not change. `cacheKey` must uniquely identify the message (e.g. its
+ * database id); pass `null` to bypass the cache.
+ */
+export function renderAssistantMarkdownCached(
+  cacheKey: string | null,
+  text: string,
+): string {
+  if (!cacheKey) return renderMarkdown(text);
+  const cached = markdownRenderCache.get(cacheKey);
+  if (cached && cached.text === text) {
+    // Refresh LRU order.
+    markdownRenderCache.delete(cacheKey);
+    markdownRenderCache.set(cacheKey, cached);
+    return cached.html;
+  }
+  const html = renderMarkdown(text);
+  putMarkdownRenderCache(cacheKey, text, html);
+  return html;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,9 +342,13 @@ export function finalizeStreamingBubble(bubble: HTMLDivElement | null): void {
 /**
  * Create a throttled wrapper around a patch function.
  *
- * During streaming, `onDelta` fires very frequently. This helper ensures
- * we only perform a DOM update at most once every `intervalMs` milliseconds,
- * keeping the UI responsive without overwhelming the renderer.
+ * During streaming, `onDelta` fires very frequently. This helper schedules at
+ * most one DOM update per animation frame and never more often than
+ * `intervalMs`, keeping the UI responsive without overwhelming the renderer.
+ *
+ * Scheduling via `requestAnimationFrame` (when available) aligns DOM writes
+ * with frame boundaries instead of firing between them; a trailing patch is
+ * always executed, so the final delta is never dropped.
  *
  * @param patchFn  The function that performs the actual DOM patch.
  * @param intervalMs  Minimum interval between consecutive patches (default 30ms).
@@ -166,15 +357,34 @@ export function createQueuedStreamingPatch(
   patchFn: () => void,
   intervalMs: number = DEFAULT_PATCH_INTERVAL_MS,
 ): () => void {
-  let queued = false;
-  return () => {
-    if (queued) return;
-    queued = true;
-    setTimeout(() => {
-      queued = false;
+  let scheduled = false;
+  let lastRunAt = 0;
+
+  const run = () => {
+    scheduled = false;
+    const now = Date.now();
+    if (now - lastRunAt >= intervalMs) {
+      lastRunAt = now;
       patchFn();
-    }, intervalMs);
+      return;
+    }
+    schedule();
   };
+
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    const raf = (
+      globalThis as { requestAnimationFrame?: (cb: () => void) => unknown }
+    ).requestAnimationFrame;
+    if (typeof raf === "function") {
+      raf(() => run());
+    } else {
+      setTimeout(run, FRAME_FALLBACK_INTERVAL_MS);
+    }
+  };
+
+  return schedule;
 }
 
 // ---------------------------------------------------------------------------

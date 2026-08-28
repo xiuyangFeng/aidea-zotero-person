@@ -1,5 +1,6 @@
 import type { PaperContextRef } from "./types";
 import { getZoteroItem as getZoteroItemById } from "../../utils/zoteroItems";
+import { getDocumentAdapterForItem } from "./document/registry";
 
 function normalizeText(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -128,7 +129,7 @@ export function resolvePaperContextRefFromAttachment(
   if (
     !contextItem ||
     !contextItem.isAttachment?.() ||
-    contextItem.attachmentContentType !== "application/pdf"
+    !getDocumentAdapterForItem(contextItem)
   ) {
     return null;
   }
@@ -181,4 +182,35 @@ export function resolvePaperContextRefFromAttachment(
     firstCreator: firstCreator || undefined,
     year: year || undefined,
   };
+}
+
+/**
+ * Resolve a library selection entry to a paper context reference.
+ *
+ * Accepts either an attachment or a regular item; for regular items the first
+ * readable attachment is used, preferring PDF when an item carries several
+ * formats so the choice matches the reader's own default.
+ */
+export function resolvePaperContextRefFromLibraryItem(
+  item: Zotero.Item | null | undefined,
+): PaperContextRef | null {
+  if (!item) return null;
+  if (item.isAttachment?.()) {
+    return resolvePaperContextRefFromAttachment(item);
+  }
+  if (!item.isRegularItem?.()) return null;
+
+  const readable: Zotero.Item[] = [];
+  for (const attachmentId of item.getAttachments()) {
+    const attachment = getZoteroItemById(attachmentId);
+    if (attachment && getDocumentAdapterForItem(attachment)) {
+      readable.push(attachment);
+    }
+  }
+  if (!readable.length) return null;
+  const preferred =
+    readable.find(
+      (attachment) => getDocumentAdapterForItem(attachment)?.kind === "pdf",
+    ) || readable[0];
+  return resolvePaperContextRefFromAttachment(preferred);
 }

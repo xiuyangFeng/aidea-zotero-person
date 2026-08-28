@@ -22,11 +22,10 @@
   <strong>🌐 Website:</strong> <a href="https://visterainer.github.io/aidea-zotero/fr/">https://visterainer.github.io/aidea-zotero/fr/</a>
 </p>
 
-AIdea est un plugin open source et gratuit pour Zotero, conçu comme assistant de recherche alimenté par l'IA. 🔐 Il prend en charge la connexion OAuth avec OpenAI (ChatGPT), Google Gemini et GitHub Copilot. ⚙️ Il prend aussi en charge les API compatibles OpenAI, ainsi que les modèles locaux ou auto-hébergés via Ollama, LM Studio, vLLM et des environnements similaires. Il intègre dans la vue Bibliothèque et les lecteurs PDF et EPUB de Zotero le dialogue avec plusieurs fournisseurs, l'analyse contextuelle des documents, l'export de notes, la mémoire locale, la traduction par sélection et la traduction intégrale des documents.
+AIdea est un plugin open source et gratuit pour Zotero, conçu comme assistant de recherche alimenté par l'IA. 🔐 Il prend en charge la connexion OAuth avec OpenAI (ChatGPT) et GitHub Copilot. ⚙️ Il prend aussi en charge les API compatibles OpenAI, ainsi que les modèles locaux ou auto-hébergés via Ollama, LM Studio, vLLM et des environnements similaires. Il intègre dans la vue Bibliothèque et les lecteurs PDF et EPUB de Zotero le dialogue avec plusieurs fournisseurs, l'analyse contextuelle des documents, l'export de notes, la mémoire locale, la traduction par sélection et la traduction intégrale des documents.
 
 <p align="center">
   <img alt="OpenAI ChatGPT" src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" />
-  <img alt="Google Gemini" src="https://img.shields.io/badge/Google-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img alt="GitHub Copilot" src="https://img.shields.io/badge/GitHub-Copilot-111111?style=for-the-badge&logo=github&logoColor=white" />
 </p>
 
@@ -87,9 +86,10 @@ AIdea s'adresse aux chercheurs qui souhaitent conserver dans Zotero la lecture d
 | Option                                 | Authentification                               | Remarques                                                                      |
 | -------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
 | OpenAI (ChatGPT)                       | OAuth via Codex CLI                            | Le plugin peut installer automatiquement l'environnement Node.js si nécessaire |
-| Google Gemini                          | OAuth intégré au plugin (PKCE)                 | Le plugin peut installer automatiquement l'environnement Node.js si nécessaire |
 | GitHub Copilot                         | OAuth intégré au plugin (Device Code)          | Aucun bootstrap Node.js supplémentaire n'est requis                            |
 | Point de terminaison compatible OpenAI | URL de base API, modèle et clé API facultative | Convient aux services locaux, auto-hébergés ou tiers compatibles               |
+
+> **Remarque :** la prise en charge de l'OAuth Gemini CLI a été retirée, car Google a fermé le 18 juin 2026 l'accès OAuth Code Assist pour les comptes individuels (y compris Google AI Pro/Ultra). Les modèles Gemini restent utilisables avec une clé API Gemini via n'importe quel point de terminaison personnalisé compatible OpenAI, ou via le catalogue de modèles de GitHub Copilot.
 
 ## Installation
 

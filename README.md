@@ -24,13 +24,12 @@
 
 <p align="center">
   <strong>A free, open-source AI assistant plugin for Zotero</strong><br/>
-  🔐 OAuth login with OpenAI (ChatGPT), Google Gemini, and GitHub Copilot<br/>
+  🔐 OAuth login with OpenAI (ChatGPT) and GitHub Copilot<br/>
   ⚙️ OpenAI-compatible APIs and local or self-hosted models via Ollama, LM Studio, vLLM, and similar runtimes
 </p>
 
 <p align="center">
   <img alt="OpenAI ChatGPT" src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" />
-  <img alt="Google Gemini" src="https://img.shields.io/badge/Google-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img alt="GitHub Copilot" src="https://img.shields.io/badge/GitHub-Copilot-111111?style=for-the-badge&logo=github&logoColor=white" />
 </p>
 
@@ -118,8 +117,9 @@ Example outputs:
 | Provider             | Auth Method                   | Extra Setup              |
 | -------------------- | ----------------------------- | ------------------------ |
 | **OpenAI (ChatGPT)** | OAuth via Codex CLI           | Node.js (auto-installed) |
-| **Google Gemini**    | In-plugin OAuth (PKCE)        | Node.js (auto-installed) |
 | **GitHub Copilot**   | In-plugin OAuth (Device Code) | None                     |
+
+> **Note:** Gemini CLI OAuth support was removed because Google shut down Code Assist OAuth access for individual accounts (including Google AI Pro/Ultra) on June 18, 2026. Gemini models remain usable via a Gemini API key through any OpenAI-compatible custom endpoint, or through GitHub Copilot's model catalog.
 
 ### 📝 Note Export
 
@@ -158,7 +158,7 @@ The plugin interface now supports **12 UI languages**: **English**, **简体中�
 ### Requirements
 
 - **Zotero 7 or later**
-- **Node.js**, required for OpenAI and Gemini, can be installed automatically by the plugin when needed
+- **Node.js**, required for OpenAI (Codex CLI), can be installed automatically by the plugin when needed
 
 ### Install the Plugin
 
@@ -190,12 +190,12 @@ For each provider card, the typical setup order is:
 
 > **① `Install/Update Env`** → **② `OAuth Login`** → **③ `Refresh Models`**
 
-| Button                   | What it does                                                                                                                                                                  |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`Install/Update Env`** | Installs and configures the required CLI tools and runtime, including Node.js and npm when needed. GitHub Copilot does not require this step.                                 |
-| **`OAuth Login`**        | Starts the provider-specific login flow. OpenAI and Gemini open the browser directly. GitHub Copilot shows a device code, copies it, and opens the browser for authorization. |
-| **`Refresh Models`**     | Loads the list of available models for the provider after login.                                                                                                              |
-| **`Remove Auth`**        | Clears the locally stored OAuth token for that provider.                                                                                                                      |
+| Button                   | What it does                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`Install/Update Env`** | Installs and configures the required CLI tools and runtime, including Node.js and npm when needed. GitHub Copilot does not require this step.                       |
+| **`OAuth Login`**        | Starts the provider-specific login flow. OpenAI opens the browser directly. GitHub Copilot shows a device code, copies it, and opens the browser for authorization. |
+| **`Refresh Models`**     | Loads the list of available models for the provider after login.                                                                                                    |
+| **`Remove Auth`**        | Clears the locally stored OAuth token for that provider.                                                                                                            |
 
 <p align="center">
   <img src="doc/screenshots/settings_oauth_models_en.png" alt="OAuth providers and model management" width="700" />
@@ -270,7 +270,8 @@ Planned directions for future releases include:
 ## 🎨 Custom Optimizations & Enhancements
 
 This personal fork includes dedicated fixes and visual improvements:
-- **CLI & OAuth Environment Discovery**: Enhanced automatic detection for Homebrew (`/opt/homebrew/bin`) and NVM-managed global Node/npm packages (`~/.nvm/versions/node/*/lib/node_modules` and `bin`), resolving Codex and Gemini CLI OAuth login issues under macOS GUI launch environments.
+
+- **CLI & OAuth Environment Discovery**: Enhanced automatic detection for Homebrew (`/opt/homebrew/bin`) and NVM-managed global Node/npm packages (`~/.nvm/versions/node/*/lib/node_modules` and `bin`), resolving Codex CLI OAuth login issues under macOS GUI launch environments.
 - **Modernized Chat UI**:
   - Redesigned readiness banner with frosted-glass card style and fixed button text wrapping.
   - Upgraded prompt shortcuts to modern pill chips with subtle elevation and smooth hover micro-interactions.

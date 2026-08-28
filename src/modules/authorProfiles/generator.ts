@@ -18,7 +18,6 @@ import { getAuthorProfileLanguage, getStringPref, truncateText } from "./utils";
 
 const KNOWN_OAUTH_PROVIDERS = new Set<string>([
   "openai-codex",
-  "google-gemini-cli",
   "github-copilot",
 ]);
 

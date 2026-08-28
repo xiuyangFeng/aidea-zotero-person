@@ -9,6 +9,7 @@
 
 import { getModelChoices } from "../contextPanel/setupHandlers/controllers/modelSelectionController";
 import { getPanelI18n } from "../contextPanel/i18n";
+import { cleanupTranslateTempCache } from "./tempCache";
 import type { ProgressData, TranslationStats, WarningStats } from "./types";
 
 /* ── Per-tab model pref key ── */
@@ -1032,7 +1033,13 @@ const PROGRESS_TIMER_INTERVAL_MS = 250;
 const PROGRESS_SMOOTHING_FACTOR = 0.18;
 const PROGRESS_MIN_STEP = 0.25;
 const PAGE_DURATION_HISTORY_LIMIT = 8;
-const ACTIVE_JOB_LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * Sessions with live translation work (progress timer and/or running
+ * subprocess). The plugin shutdown hook drains this set so no interval keeps
+ * ticking on detached DOM and no pdf2zh/python subprocess outlives Zotero.
+ */
+const activeProgressSessions = new Set<TranslationSession>();
 
 function setSelectedPdfPath(body: Element, pdfPath: string): void {
   getTranslationSession(body).selectedPdfPath = pdfPath;
@@ -1203,10 +1210,19 @@ function _startProgressTimer(session: TranslationSession, body: Element): void {
   _stopProgressTimer(session);
   session.translationBody = body;
   session.heartbeatCounter = 0;
+  activeProgressSessions.add(session);
   session.progressTimer = setInterval(() => {
-    if (session.translationBody && session.translationStartTime > 0) {
+    const translationBody = session.translationBody;
+    if (!translationBody) return;
+    if (!translationBody.isConnected) {
+      // The panel host (and its window) went away — stop ticking on
+      // detached DOM instead of leaking the interval until shutdown.
+      _stopProgressTimer(session);
+      return;
+    }
+    if (session.translationStartTime > 0) {
       advanceDisplayedProgress(session);
-      _refreshProgressBar(session, session.translationBody);
+      _refreshProgressBar(session, translationBody);
     }
   }, PROGRESS_TIMER_INTERVAL_MS);
 }
@@ -1219,6 +1235,31 @@ function _stopProgressTimer(session: TranslationSession): void {
   }
   session.translationBody = null;
   session.heartbeatCounter = 0;
+  activeProgressSessions.delete(session);
+}
+
+/** Stop every live progress timer (used on plugin shutdown). */
+export function stopAllProgressTimers(): void {
+  for (const session of Array.from(activeProgressSessions)) {
+    _stopProgressTimer(session);
+  }
+}
+
+/**
+ * Abort translation work that belongs to `win`'s document (used when a
+ * main window closes while a job runs in it).
+ */
+export function abortTranslationsForWindow(win: Window): void {
+  for (const session of Array.from(activeProgressSessions)) {
+    const sessionWin = session.translationBody?.ownerDocument?.defaultView;
+    if (sessionWin !== win) continue;
+    try {
+      session.activeController?.abort?.();
+    } catch (err) {
+      ztoolkit.log("LLM: failed to abort translation on window unload", err);
+    }
+    _stopProgressTimer(session);
+  }
 }
 
 function restoreTranslationControls(body: Element): void {
@@ -1258,83 +1299,11 @@ function resetTranslationSessionUi(
   updateProgress(session, body, 0, "", { force: true });
   restoreTranslationControls(body);
 }
-function isAbsolutePath(path: string): boolean {
-  return (
-    /^[A-Za-z]:[\\/]/.test(path) ||
-    path.startsWith("\\\\") ||
-    path.startsWith("/")
-  );
-}
-
-function resolveChildPath(parent: string, child: string): string {
-  return isAbsolutePath(child) ? child : PathUtils.join(parent, child);
-}
-
-async function isActiveJobDirectory(jobDir: string): Promise<boolean> {
-  const lockPath = PathUtils.join(jobDir, "running.lock");
-  try {
-    if (!(await IOUtils.exists(lockPath))) return false;
-    const text = await IOUtils.readUTF8(lockPath);
-    const data = JSON.parse(text) as { startedAt?: unknown };
-    const startedAt = typeof data.startedAt === "number" ? data.startedAt : 0;
-    if (!Number.isFinite(startedAt) || startedAt <= 0) return true;
-    return Date.now() - startedAt < ACTIVE_JOB_LOCK_MAX_AGE_MS;
-  } catch {
-    return true;
-  }
-}
-
 async function clearTranslateTempCache(): Promise<{
   removed: number;
   skippedRunning: number;
 }> {
-  const tempDir = String(PathUtils.tempDir || "").trim();
-  if (!tempDir) return { removed: 0, skippedRunning: 0 };
-
-  const cacheDir = PathUtils.join(tempDir, "aidea-translate");
-  const legacyEntries = [
-    "progress.json",
-    "progress.json.tmp",
-    "config.toml",
-    "task.json",
-    "bridge.log",
-  ];
-
-  let removed = 0;
-  let skippedRunning = 0;
-  for (const entry of legacyEntries) {
-    try {
-      await IOUtils.remove(PathUtils.join(cacheDir, entry), {
-        recursive: true,
-      });
-      removed += 1;
-    } catch {
-      /* file may not exist */
-    }
-  }
-
-  const jobsDir = PathUtils.join(cacheDir, "jobs");
-  try {
-    if (!(await IOUtils.exists(jobsDir))) return { removed, skippedRunning };
-    const children = (await (IOUtils as any).getChildren(jobsDir)) as string[];
-    for (const child of children) {
-      const jobPath = resolveChildPath(jobsDir, String(child));
-      if (await isActiveJobDirectory(jobPath)) {
-        skippedRunning += 1;
-        continue;
-      }
-      try {
-        await IOUtils.remove(jobPath, { recursive: true });
-        removed += 1;
-      } catch {
-        /* ignore per-job cleanup failure */
-      }
-    }
-  } catch {
-    /* ignore cleanup failure */
-  }
-
-  return { removed, skippedRunning };
+  return cleanupTranslateTempCache();
 }
 
 /** Format seconds to MM:SS or HH:MM:SS */

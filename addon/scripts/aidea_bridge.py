@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,127 @@ try:
     import fitz  # PyMuPDF
 except Exception:
     fitz = None
+
+
+# ── Translation subprocess lifecycle ────────────────────────────────────────
+# The Zotero side kills this bridge with SIGTERM (POSIX) or TerminateProcess
+# (Windows) when the user pauses a job or quits Zotero. Without the helpers
+# below the pdf2zh_next engine would keep running as an orphan process after
+# the bridge dies, still burning API quota.
+
+_child_proc = None
+_job_handle = None
+
+
+def _terminate_child_proc():
+    """Terminate the running pdf2zh_next child, if any. Best-effort."""
+    proc = _child_proc
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+    except Exception:
+        pass
+
+
+def _install_child_kill_signal_handlers():
+    """POSIX: forward SIGTERM/SIGINT to the translation child.
+
+    Terminating the child closes its stdout pipe, so the bridge's normal
+    read loop unwinds, records the failed exit code in progress.json, and
+    exits — instead of leaving the engine running with no supervisor.
+    """
+    if not hasattr(signal, "SIGTERM"):
+        return
+
+    def _handle(_signum, _frame):
+        _terminate_child_proc()
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handle)
+        except Exception:
+            pass
+
+
+def _bind_child_to_job_object(proc):
+    """Windows: bind the child to a kill-on-close Job Object.
+
+    Zotero kills the bridge with TerminateProcess, which no Python signal
+    handler can intercept; a Job Object makes the OS terminate the whole
+    child tree when the bridge dies.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        job_flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        # Job Object extended limits require IO_COUNTERS etc.; use the
+        # JOBOBJECT_EXTENDED_LIMIT_INFORMATION layout via a raw buffer.
+        class _IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_uint64),
+                ("WriteOperationCount", ctypes.c_uint64),
+                ("OtherOperationCount", ctypes.c_uint64),
+                ("ReadTransferCount", ctypes.c_uint64),
+                ("WriteTransferCount", ctypes.c_uint64),
+                ("OtherTransferCount", ctypes.c_uint64),
+            ]
+
+        class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", ctypes.c_uint32),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", ctypes.c_uint32),
+                ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
+                ("PriorityClass", ctypes.c_uint32),
+                ("SchedulingClass", ctypes.c_uint32),
+            ]
+
+        class _JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", _IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.windll.kernel32
+        job_handle = kernel32.CreateJobObjectW(None, None)
+        if not job_handle:
+            return
+        info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = job_flags
+        if not kernel32.SetInformationJobObject(
+            job_handle,
+            9,  # JobObjectExtendedLimitInformation
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        ):
+            kernel32.CloseHandle(job_handle)
+            return
+        if not kernel32.AssignProcessToJobObject(
+            job_handle, int(proc._handle)
+        ):
+            kernel32.CloseHandle(job_handle)
+            return
+        # Keep the handle alive for the lifetime of the bridge; the OS kills
+        # the job when the (terminated) bridge's handle is closed.
+        global _job_handle
+        _job_handle = job_handle
+    except Exception:
+        # Job binding is best-effort; keep the normal Popen behaviour.
+        pass
 
 
 def _ensure_loopback_no_proxy(env):
@@ -1544,76 +1666,6 @@ def _extract_codex_output_text_from_sse(raw):
     return _dedupe_repeated_response_text(completed)
 
 
-def _generate_prompt_id():
-    suffix = "".join(f"{random.randint(0, 255):02x}" for _ in range(8))
-    return f"aidea-{int(time.time())}-{suffix}"
-
-
-def _build_gemini_prompt(messages):
-    parts = []
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        role = str(msg.get("role", "user"))
-        text = _extract_text_from_openai_content(msg.get("content")).strip()
-        if not text:
-            continue
-        role_label = "User"
-        if role == "assistant":
-            role_label = "Assistant"
-        elif role == "system":
-            role_label = "System"
-        parts.append(f"{role_label}:\n{text}")
-    if not parts:
-        return "Translate this text."
-    return "\n\n".join(parts)
-
-
-def _extract_gemini_text_from_json(data):
-    candidates = []
-    if isinstance(data, dict):
-        root_candidates = data.get("candidates")
-        if isinstance(root_candidates, list):
-            candidates = root_candidates
-        response = data.get("response")
-        if isinstance(response, dict) and isinstance(response.get("candidates"), list):
-            candidates = response["candidates"]
-
-    out = []
-    for cand in candidates:
-        if not isinstance(cand, dict):
-            continue
-        content = cand.get("content")
-        if not isinstance(content, dict):
-            continue
-        parts = content.get("parts")
-        if not isinstance(parts, list):
-            continue
-        for part in parts:
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                out.append(part["text"])
-    return "".join(out)
-
-
-def _extract_gemini_text_from_sse(raw):
-    out = []
-    for line in raw.splitlines():
-        trimmed = line.strip()
-        if not trimmed.startswith("data:"):
-            continue
-        payload = trimmed[5:].strip()
-        if not payload or payload == "[DONE]":
-            continue
-        try:
-            parsed = json.loads(payload)
-        except Exception:
-            continue
-        text = _extract_gemini_text_from_json(parsed)
-        if text:
-            out.append(text)
-    return "".join(out)
-
-
 COPILOT_EDITOR_VERSION = "vscode/1.96.2"
 COPILOT_USER_AGENT = "GitHubCopilotChat/0.26.7"
 COPILOT_DEFAULT_API_BASE = "https://api.individual.githubcopilot.com"
@@ -1943,7 +1995,6 @@ def _to_openai_completion_stream_chunks(model, text):
 class OAuthCompatProxyServer:
     """Temporary local OpenAI-compatible adapter for OAuth and proxied API providers."""
 
-    GEMINI_STREAM_URL = "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
     CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 
     def __init__(self, proxy_cfg, debug_log=None, debug_enabled=False):
@@ -2123,8 +2174,6 @@ class OAuthCompatProxyServer:
             return self._forward_openai_compatible(payload)
         if provider == "openai-codex":
             return self._forward_codex(payload)
-        if provider == "google-gemini-cli":
-            return self._forward_gemini(payload)
         if provider == "github-copilot":
             return self._forward_copilot(payload)
         raise RuntimeError(f"Unsupported OAuth proxy provider: {provider}")
@@ -2280,69 +2329,6 @@ class OAuthCompatProxyServer:
             model,
             request_json_mode,
             "codex-responses-sse",
-            raw,
-            text,
-            normalized_output["filtered_reasoning_chars"],
-        )
-        return text
-
-    def _forward_gemini(self, payload):
-        access_token = str(self.proxy_cfg.get("accessToken", "")).strip()
-        if not access_token:
-            raise RuntimeError("Missing OAuth access token for google-gemini-cli")
-        project_id = str(self.proxy_cfg.get("projectId", "")).strip()
-        if not project_id:
-            raise RuntimeError(
-                "Missing Google project ID for Gemini OAuth. Re-login in AIdea settings."
-            )
-
-        model = str(payload.get("model", "")).strip()
-        if model.startswith("models/"):
-            model = model[7:]
-        messages = payload.get("messages")
-        if not isinstance(messages, list):
-            messages = []
-
-        request = {
-            "contents": [{"role": "user", "parts": [{"text": _build_gemini_prompt(messages)}]}],
-        }
-        generation_cfg = {}
-        temp = payload.get("temperature")
-        max_tokens = payload.get("max_tokens")
-        if isinstance(temp, (int, float)):
-            generation_cfg["temperature"] = float(temp)
-        if isinstance(max_tokens, (int, float)):
-            generation_cfg["maxOutputTokens"] = max(1, int(max_tokens))
-        if generation_cfg:
-            request["generationConfig"] = generation_cfg
-
-        req_body = {
-            "model": model,
-            "project": project_id,
-            "user_prompt_id": _generate_prompt_id(),
-            "request": request,
-        }
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "User-Agent": f"AIdea/1.0/{model}",
-        }
-        raw = _http_post_json_with_retry(self.GEMINI_STREAM_URL, req_body, headers, timeout=300)
-        text = _extract_gemini_text_from_sse(raw)
-        if not text.strip():
-            try:
-                data = json.loads(raw)
-            except Exception:
-                data = {}
-            text = _extract_gemini_text_from_json(data)
-        normalized_output = self._normalize_provider_output(text)
-        text = normalized_output["text"]
-        self._debug_response(
-            "google-gemini-cli",
-            model,
-            False,
-            "gemini-sse",
             raw,
             text,
             normalized_output["filtered_reasoning_chars"],
@@ -2717,6 +2703,11 @@ def main():
                 logFile=log_file,
             ))
             sys.exit(1)
+
+        # Terminate the engine when Zotero kills this bridge (pause/quit).
+        _install_child_kill_signal_handlers()
+        _bind_child_to_job_object(proc)
+        globals()["_child_proc"] = proc
 
         last_raw_pct = 0   # raw page-level pct from stdout (0-100)
         last_pct = PHASE_TRANSLATE_START  # mapped overall pct

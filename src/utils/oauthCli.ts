@@ -6,6 +6,14 @@ import {
 import { fetchWithTransientRetry } from "./transientRetry";
 import { recordOAuthEnvUpdateSuccess } from "./oauthEnvUpdateState";
 import {
+  getAnthropicReasoningProfileForModel,
+  getGrokReasoningProfileForModel,
+  getOpenAIReasoningProfileForModel,
+  supportsReasoningForModel,
+  type ReasoningLevel,
+  type ReasoningProvider,
+} from "./reasoningProfiles";
+import {
   DEFAULT_PANEL_LANG,
   detectPanelLangFromLocale,
   getUiLanguageOption,
@@ -202,8 +210,7 @@ function showCopiedToast(lang: OAuthUiLang): void {
   }
 }
 
-export type OAuthProviderId =
-  "openai-codex" | "google-gemini-cli" | "github-copilot";
+export type OAuthProviderId = "openai-codex" | "github-copilot";
 
 export type OAuthCredential = {
   provider: OAuthProviderId;
@@ -270,13 +277,6 @@ const PROVIDER_CLI_SPECS: Partial<Record<OAuthProviderId, ProviderCliSpec>> = {
     packageName: "@openai/codex",
     executableName: "codex",
     versionArg: "--version",
-  },
-  "google-gemini-cli": {
-    packageName: "@google/gemini-cli",
-    executableName: "gemini",
-    versionArg: "--version",
-    minNodeVersion: [20, 0, 0],
-    minNodeVersionLabel: "Node.js >= 20",
   },
 };
 
@@ -468,13 +468,6 @@ export function markerToProvider(
   const raw = String(value || "").trim();
   if (raw === providerToMarker("openai-codex") || raw === "openai-codex")
     return "openai-codex";
-  if (
-    raw === providerToMarker("google-gemini-cli") ||
-    raw === "google-gemini-cli"
-  ) {
-    return "google-gemini-cli";
-  }
-
   if (raw === providerToMarker("github-copilot") || raw === "github-copilot")
     return "github-copilot";
   return null;
@@ -2114,8 +2107,6 @@ async function readJsonFile(path: string): Promise<any | null> {
 
 export function getProviderLabel(provider: OAuthProviderId): string {
   if (provider === "openai-codex") return "ChatGPT (Codex OAuth)";
-  if (provider === "google-gemini-cli") return "Gemini (Gemini CLI OAuth)";
-
   if (provider === "github-copilot") return "GitHub Copilot";
   return provider;
 }
@@ -2187,182 +2178,6 @@ async function refreshCodexOAuthCredentialViaCli(): Promise<OAuthCredential | nu
   }
 }
 
-/**
- * Refresh the Gemini OAuth access token using the stored refresh token.
- * Returns a fresh credential or null if refresh is impossible.
- *
- * The access token from Google OAuth has a ~1 hour lifetime.  Without
- * this refresh, every chat request after the first hour fails with 401.
- */
-async function refreshGeminiAccessToken(
-  cred: OAuthCredential,
-): Promise<OAuthCredential | null> {
-  if (!cred.refreshToken) return null;
-  try {
-    const clientCreds = await extractGeminiCliCredentials();
-    if (!clientCreds) {
-      ztoolkit?.log?.(
-        "AIdea: Cannot refresh Gemini token — no client credentials",
-      );
-      return null;
-    }
-    ztoolkit?.log?.("AIdea: Refreshing Gemini OAuth access token...");
-    const body = new URLSearchParams({
-      client_id: clientCreds.clientId,
-      client_secret: clientCreds.clientSecret,
-      refresh_token: cred.refreshToken,
-      grant_type: "refresh_token",
-    });
-    const res = await getFetch()("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        Accept: "*/*",
-      },
-      body: body.toString(),
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      ztoolkit?.log?.(
-        "AIdea: Gemini token refresh failed:",
-        res.status,
-        errText.slice(0, 200),
-      );
-      return null;
-    }
-    const data = (await res.json()) as {
-      access_token?: string;
-      expires_in?: number;
-      refresh_token?: string;
-    };
-    const newAccessToken = data.access_token?.trim();
-    if (!newAccessToken) {
-      ztoolkit?.log?.("AIdea: Gemini token refresh returned no access_token");
-      return null;
-    }
-    const newExpiresAt =
-      Date.now() + (data.expires_in || 3600) * 1000 - 5 * 60 * 1000;
-    // A refresh response may include a rotated refresh_token
-    const newRefreshToken = data.refresh_token?.trim() || cred.refreshToken;
-
-    // Persist to Zotero prefs
-    setOAuthPref("geminiOAuthAccessToken", newAccessToken);
-    setOAuthPref("geminiOAuthExpiresAt", String(newExpiresAt));
-    if (newRefreshToken !== cred.refreshToken) {
-      setOAuthPref("geminiOAuthRefreshToken", newRefreshToken);
-    }
-
-    // Also update the file-based credential if it exists
-    if (cred.sourcePath) {
-      try {
-        const existing = await readJsonFile(cred.sourcePath);
-        if (existing && typeof existing === "object") {
-          existing.access_token = newAccessToken;
-          if (data.expires_in) {
-            existing.expiry_date = newExpiresAt;
-          }
-          if (data.refresh_token) {
-            existing.refresh_token = newRefreshToken;
-          }
-          const raw = JSON.stringify(existing, null, 2);
-          const io = (globalThis as any).IOUtils;
-          if (io?.writeUTF8) {
-            await io.writeUTF8(cred.sourcePath, raw);
-          }
-        }
-      } catch {
-        // Best-effort file update; prefs are the authoritative store
-      }
-    }
-
-    ztoolkit?.log?.("AIdea: Gemini access token refreshed successfully");
-    return {
-      ...cred,
-      accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
-      expiresAt: newExpiresAt,
-    };
-  } catch (err) {
-    ztoolkit?.log?.("AIdea: Gemini token refresh exception:", err);
-    return null;
-  }
-}
-
-/** Check if a Gemini credential's access token is expired or about to expire. */
-function isGeminiTokenExpired(cred: OAuthCredential): boolean {
-  if (!cred.expiresAt) return false; // Unknown expiry — assume valid
-  // Consider expired if within 2 minutes of expiry
-  return Date.now() >= cred.expiresAt - 2 * 60 * 1000;
-}
-
-export async function readGeminiOAuthCredential(): Promise<OAuthCredential | null> {
-  // 1. Check Zotero Prefs first (from in-plugin OAuth flow)
-  const prefsToken = getOAuthPref("geminiOAuthAccessToken");
-  if (prefsToken) {
-    const refreshToken = getOAuthPref("geminiOAuthRefreshToken") || undefined;
-    const expiresAt =
-      Number(getOAuthPref("geminiOAuthExpiresAt") || "0") || undefined;
-    const projectId = getOAuthPref("geminiOAuthProjectId") || undefined;
-    let cred: OAuthCredential = {
-      provider: "google-gemini-cli",
-      accessToken: prefsToken,
-      refreshToken,
-      expiresAt,
-      projectId,
-    };
-    // Auto-refresh if token is expired
-    if (isGeminiTokenExpired(cred) && refreshToken) {
-      const refreshed = await refreshGeminiAccessToken(cred);
-      if (refreshed) cred = refreshed;
-    }
-    return cred;
-  }
-
-  // 2. Fall back to file-based credentials (~/.gemini/oauth_creds.json)
-  const home = homeDir();
-  if (!home) return null;
-  const credPath = joinPath(home, ".gemini", "oauth_creds.json");
-  const data = await readJsonFile(credPath);
-  if (!data || typeof data !== "object") return null;
-  const accessToken =
-    (typeof data.access_token === "string" && data.access_token.trim()) ||
-    (typeof data.token === "string" && data.token.trim()) ||
-    "";
-  if (!accessToken) return null;
-  const refreshToken =
-    (typeof data.refresh_token === "string" && data.refresh_token.trim()) ||
-    undefined;
-  const expiryRaw = data.expiry_date ?? data.expires_at ?? data.expires;
-  const expiresAt =
-    typeof expiryRaw === "number" && Number.isFinite(expiryRaw)
-      ? Number(expiryRaw)
-      : undefined;
-  let projectId =
-    (typeof data.project_id === "string" && data.project_id.trim()) ||
-    (typeof data.projectId === "string" && data.projectId.trim()) ||
-    undefined;
-  // Also check Zotero prefs — an earlier lazy discovery may have cached the
-  // project ID even though the credential file doesn't contain it.
-  if (!projectId) {
-    const cachedProject = getOAuthPref("geminiOAuthProjectId");
-    if (cachedProject) projectId = cachedProject;
-  }
-  let cred: OAuthCredential = {
-    provider: "google-gemini-cli",
-    accessToken,
-    refreshToken,
-    expiresAt,
-    projectId,
-    sourcePath: credPath,
-  };
-  // Auto-refresh if token is expired
-  if (isGeminiTokenExpired(cred) && refreshToken) {
-    const refreshed = await refreshGeminiAccessToken(cred);
-    if (refreshed) cred = refreshed;
-  }
-  return cred;
-}
-
 // ---------- Zotero Prefs helpers for plugin-native OAuth ----------
 const OAUTH_PREF_PREFIX = "extensions.zotero.aidea.";
 function getOAuthPref(key: string): string {
@@ -2378,6 +2193,73 @@ function setOAuthPref(key: string, value: string): void {
     Zotero.Prefs.set(`${OAUTH_PREF_PREFIX}${key}`, value, true);
   } catch {
     // silently ignore
+  }
+}
+
+/**
+ * One-time cleanup after the Gemini CLI OAuth provider was removed
+ * (Google shut down Code Assist OAuth for individual accounts on 2026-06-18).
+ * Rewrites profile slots that still point at the removed provider, clears
+ * stored Gemini tokens, and drops the provider from the model caches.
+ */
+export function migrateLegacyGeminiOAuthState(): void {
+  const LEGACY_MARKER = "oauth://google-gemini-cli";
+  const LEGACY_PROVIDER_ID = "google-gemini-cli";
+
+  const modelKeyByApiBaseKey: Record<string, string> = {
+    apiBase: "model",
+    apiBasePrimary: "modelPrimary",
+    apiBaseSecondary: "modelSecondary",
+    apiBaseTertiary: "modelTertiary",
+    apiBaseQuaternary: "modelQuaternary",
+  };
+  for (const [apiBaseKey, modelKey] of Object.entries(modelKeyByApiBaseKey)) {
+    if (getOAuthPref(apiBaseKey).trim() !== LEGACY_MARKER) continue;
+    setOAuthPref(apiBaseKey, providerToMarker("github-copilot"));
+    setOAuthPref(modelKey, "");
+  }
+
+  for (const key of [
+    "geminiOAuthAccessToken",
+    "geminiOAuthRefreshToken",
+    "geminiOAuthExpiresAt",
+    "geminiOAuthScope",
+    "geminiOAuthProjectId",
+  ]) {
+    if (getOAuthPref(key)) setOAuthPref(key, "");
+  }
+
+  for (const cacheKey of ["oauthModelListCache", "oauthModelSelectionCache"]) {
+    const raw = getOAuthPref(cacheKey).trim();
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        LEGACY_PROVIDER_ID in parsed
+      ) {
+        delete parsed[LEGACY_PROVIDER_ID];
+        setOAuthPref(cacheKey, JSON.stringify(parsed));
+      }
+    } catch {
+      // leave malformed cache untouched
+    }
+  }
+
+  const isLegacyProviderRef = (value: string): boolean => {
+    const normalized = value.trim().toLowerCase();
+    return normalized === LEGACY_PROVIDER_ID || normalized === "gemini";
+  };
+  for (const [providerKey, modelKey] of [
+    ["lastUsedModelProvider", "lastUsedModelName"],
+    ["lastUsedModelProvider.translate", "lastUsedModelName.translate"],
+    ["selectionTranslate.provider", "selectionTranslate.model"],
+    ["authorProfiles.provider", "authorProfiles.model"],
+  ]) {
+    if (!isLegacyProviderRef(getOAuthPref(providerKey))) continue;
+    setOAuthPref(providerKey, "");
+    setOAuthPref(modelKey, "");
   }
 }
 
@@ -2836,8 +2718,6 @@ export async function readProviderOAuthCredential(
   provider: OAuthProviderId,
 ): Promise<OAuthCredential | null> {
   if (provider === "openai-codex") return readCodexOAuthCredential();
-  if (provider === "google-gemini-cli") return readGeminiOAuthCredential();
-
   if (provider === "github-copilot") return readCopilotOAuthCredential();
   return null;
 }
@@ -3018,9 +2898,6 @@ function ensureProviderAuthHeaderInit(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${cred.accessToken}`,
   };
-  if (cred.provider === "google-gemini-cli" && cred.projectId) {
-    headers["x-goog-user-project"] = cred.projectId;
-  }
   if (cred.provider === "github-copilot") {
     Object.assign(headers, buildCopilotDynamicHeaders());
   }
@@ -3038,18 +2915,6 @@ const CODEX_KNOWN_MODELS: ProviderModelOption[] = [
   { id: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
   { id: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max" },
   { id: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini" },
-];
-
-/**
- * Known Gemini CLI models (static fallback when the dynamic discovery
- * API call fails or returns nothing).
- */
-const GEMINI_CLI_KNOWN_MODELS: ProviderModelOption[] = [
-  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
-  { id: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
-  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
 ];
 
 /**
@@ -3191,14 +3056,9 @@ export async function fetchAvailableModels(
       return [...COPILOT_KNOWN_MODELS];
     }
 
-    // ---------- Google Gemini CLI ----------
-    // Gemini CLI OAuth tokens can't access generativelanguage.googleapis.com directly.
-    // Use static model list (dynamic fetch via Cloud Code proxy is not reliable).
-    return [...GEMINI_CLI_KNOWN_MODELS];
+    return [];
   } catch (err) {
     ztoolkit?.log?.("AIdea: fetchAvailableModels failed", provider, err);
-    if (provider === "google-gemini-cli") return [...GEMINI_CLI_KNOWN_MODELS];
-
     if (provider === "github-copilot") return [...COPILOT_KNOWN_MODELS];
     return [];
   }
@@ -3297,663 +3157,6 @@ export async function fetchCustomEndpointModels(
     ztoolkit?.log?.("AIdea: fetchCustomEndpointModels failed", err);
     throw err;
   }
-}
-
-// ─── Gemini in-plugin OAuth (Authorization Code + PKCE) ───
-
-const GEMINI_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-const GEMINI_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const GEMINI_REDIRECT_URI = "http://localhost:8085/oauth2callback";
-const GEMINI_SCOPES = [
-  "https://www.googleapis.com/auth/cloud-platform",
-  "https://www.googleapis.com/auth/userinfo.email",
-  "https://www.googleapis.com/auth/userinfo.profile",
-];
-const GEMINI_CODE_ASSIST_API_BASE =
-  "https://cloudcode-pa.googleapis.com/v1internal";
-export const GEMINI_CODE_ASSIST_STREAM_URL = `${GEMINI_CODE_ASSIST_API_BASE}:streamGenerateContent?alt=sse`;
-
-/** Extract client_id and client_secret from the installed Gemini CLI. */
-async function getNpmGlobalRootCandidates(): Promise<string[]> {
-  const platform = currentPlatform();
-  const home = homeDir();
-  const roots = new Set<string>();
-  const npmPath =
-    (await locateExecutableViaShell("npm")) || resolveExecutablePath("npm");
-
-  if (npmPath) {
-    const rootResult = await runExecutableCommand(npmPath, ["root", "-g"]);
-    const rootOut = String(rootResult.output || "")
-      .split(/\r?\n/g)
-      .map((line) => line.trim())
-      .find(Boolean);
-    if (rootOut) roots.add(rootOut);
-
-    const prefixResult = await runExecutableCommand(npmPath, [
-      "config",
-      "get",
-      "prefix",
-    ]);
-    const prefixOut = String(prefixResult.output || "")
-      .split(/\r?\n/g)
-      .map((line) => line.trim())
-      .find(Boolean);
-    if (prefixOut) {
-      roots.add(deriveNpmGlobalRootFromPrefix(prefixOut, platform));
-    }
-  }
-
-  if (platform === "windows") {
-    const appData = getEnv("APPDATA") || joinPath(home, "AppData", "Roaming");
-    roots.add(joinPath(appData, "npm", "node_modules"));
-  } else {
-    roots.add("/opt/homebrew/lib/node_modules");
-    roots.add("/usr/local/lib/node_modules");
-    if (home) {
-      roots.add(joinPath(home, ".npm-global", "lib", "node_modules"));
-    }
-  }
-
-  // Include NVM and other package managers' global module dirs
-  try {
-    const { globalModuleDirs } = getNvmNodeDirs();
-    for (const modDir of globalModuleDirs) {
-      roots.add(modDir);
-    }
-  } catch {
-    // ignore
-  }
-
-  return Array.from(roots).filter(Boolean);
-}
-
-async function extractGeminiCliCredentials(): Promise<{
-  clientId: string;
-  clientSecret: string;
-} | null> {
-  try {
-    const roots = await getNpmGlobalRootCandidates();
-
-    // Build candidate paths for the oauth2 credentials file.
-    // npm v7+ may "hoist" @google/gemini-cli-core to the top-level
-    // node_modules instead of nesting it under gemini-cli/node_modules.
-    // We also check an alternative path (oauth2-provider.js) for newer
-    // Gemini CLI versions that reorganised the dist layout.
-    const candidates: string[] = [];
-    for (const root of roots) {
-      // 1. Nested layout (npm v6 / non-hoisted):
-      //    <root>/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js
-      candidates.push(
-        joinPath(
-          root,
-          "@google",
-          "gemini-cli",
-          "node_modules",
-          "@google",
-          "gemini-cli-core",
-          "dist",
-          "src",
-          "code_assist",
-          "oauth2.js",
-        ),
-      );
-      // 2. Hoisted layout (npm v7+ default):
-      //    <root>/@google/gemini-cli-core/dist/src/code_assist/oauth2.js
-      candidates.push(
-        joinPath(
-          root,
-          "@google",
-          "gemini-cli-core",
-          "dist",
-          "src",
-          "code_assist",
-          "oauth2.js",
-        ),
-      );
-      // 3. Alternative path (newer Gemini CLI versions):
-      //    <root>/@google/gemini-cli-core/dist/src/agents/auth-provider/oauth2-provider.js
-      candidates.push(
-        joinPath(
-          root,
-          "@google",
-          "gemini-cli",
-          "node_modules",
-          "@google",
-          "gemini-cli-core",
-          "dist",
-          "src",
-          "agents",
-          "auth-provider",
-          "oauth2-provider.js",
-        ),
-      );
-      candidates.push(
-        joinPath(
-          root,
-          "@google",
-          "gemini-cli-core",
-          "dist",
-          "src",
-          "agents",
-          "auth-provider",
-          "oauth2-provider.js",
-        ),
-      );
-    }
-
-    let content: string | null = null;
-    for (const p of candidates) {
-      try {
-        const c = String(Zotero.File.getContents(p) || "");
-        if (c) {
-          content = c;
-          break;
-        }
-      } catch {
-        /* try next */
-      }
-    }
-
-    if (content) {
-      const idMatch = content.match(
-        /(\d+-[a-z0-9]+\.apps\.googleusercontent\.com)/,
-      );
-      const secretMatch = content.match(/(GOCSPX-[A-Za-z0-9_-]+)/);
-      if (idMatch && secretMatch) {
-        return { clientId: idMatch[1], clientSecret: secretMatch[1] };
-      }
-    }
-
-    // ── Bundled CLI fallback (v0.36.0+) ──
-    // Starting from v0.36.0 the Gemini CLI ships as a single self-contained
-    // bundle (bundle/gemini.js, ~93 MB).  The separate @google/gemini-cli-core
-    // directory no longer exists, so the file-based extraction above finds
-    // nothing.  Reading a 93 MB bundle just to regex-match two strings is
-    // impractical, so instead we verify the CLI executable is present and use
-    // the well-known OAuth credentials from the Gemini CLI source.
-    //
-    // These are public constants that Google explicitly documents as safe to
-    // embed in installed applications:
-    //   https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/oauth2.ts
-    //   "Note: It's ok to save this in git because this is an installed
-    //    application … the client secret is obviously not treated as a secret."
-    const geminiPath =
-      (await locateExecutableViaShell("gemini")) ||
-      resolveExecutablePath("gemini");
-    const home = homeDir();
-    const hasExistingGeminiAuth = Boolean(
-      home && pathExists(joinPath(home, ".gemini", "oauth_creds.json")),
-    );
-    if (geminiPath || hasExistingGeminiAuth) {
-      ztoolkit?.log?.(
-        "AIdea: Gemini CLI found at",
-        geminiPath || "(detected ~/.gemini/oauth_creds.json)",
-        "— using bundled-CLI fallback credentials",
-      );
-      return {
-        clientId:
-          "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-        clientSecret: "GOCSPX-" + "4uHgMPm-1o7Sk-geV6Cu5clXFsxl",
-      };
-    }
-  } catch (err) {
-    ztoolkit?.log?.("AIdea: extractGeminiCliCredentials failed", err);
-  }
-  return null;
-}
-
-function generateGeminiPkce(): { verifier: string; challenge: string } {
-  const array = new Uint8Array(32);
-  (crypto as any).getRandomValues(array);
-  const verifier = Array.from(array, (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-  try {
-    const hasher = Cc["@mozilla.org/security/hash;1"].createInstance(
-      Ci.nsICryptoHash,
-    );
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    hasher.init(hasher.SHA256);
-    hasher.update(data, data.length);
-    const hash = hasher.finish(false);
-    const challenge = btoa(hash)
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-    return { verifier, challenge };
-  } catch {
-    return { verifier, challenge: verifier };
-  }
-}
-
-async function loginGeminiInPlugin(): Promise<{
-  ok: boolean;
-  message: string;
-}> {
-  try {
-    const creds = await extractGeminiCliCredentials();
-    if (!creds) {
-      return {
-        ok: false,
-        message:
-          "Gemini CLI not found. Install it first: npm install -g @google/gemini-cli",
-      };
-    }
-    const { verifier, challenge } = generateGeminiPkce();
-    const authParams = new URLSearchParams({
-      client_id: creds.clientId,
-      response_type: "code",
-      redirect_uri: GEMINI_REDIRECT_URI,
-      scope: GEMINI_SCOPES.join(" "),
-      code_challenge: challenge,
-      code_challenge_method: "S256",
-      state: verifier,
-      access_type: "offline",
-      prompt: "consent",
-    });
-    const authUrl = `${GEMINI_AUTH_URL}?${authParams.toString()}`;
-
-    // Start local callback server using a Node.js child process
-    // (XPCOM nsIServerSocket is unreliable in Zotero; reference uses Node.js http.createServer)
-    const tempDir =
-      Zotero.getTempDirectory?.()?.path || Zotero.DataDirectory?.dir || ".";
-    const sep = currentPlatform() === "windows" ? "\\" : "/";
-    const serverScriptPath = `${tempDir}${sep}aidea-gemini-oauth-server-${Date.now()}.js`;
-    const resultFilePath = `${tempDir}${sep}aidea-gemini-oauth-result-${Date.now()}.json`;
-
-    // Write a tiny Node.js HTTP server script
-    const serverScript = `
-const http = require('http');
-const fs = require('fs');
-const url = require('url');
-const resultPath = ${JSON.stringify(resultFilePath)};
-const server = http.createServer((req, res) => {
-  const parsed = url.parse(req.url, true);
-  if (parsed.pathname === '/oauth2callback') {
-    const code = parsed.query.code || '';
-    const error = parsed.query.error || '';
-    const state = parsed.query.state || '';
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    if (code) {
-      res.end('<!doctype html><html><body><h2>Gemini OAuth Complete</h2><p>You can close this window and return to Zotero.</p></body></html>');
-    } else {
-      res.end('<h2>Auth failed: ' + (error || 'no code') + '</h2>');
-    }
-    fs.writeFileSync(resultPath, JSON.stringify({ code, error, state }));
-    server.close();
-    setTimeout(() => process.exit(0), 500);
-  } else {
-    res.writeHead(404);
-    res.end('Not found');
-  }
-});
-server.listen(8085, 'localhost', () => {});
-setTimeout(() => { server.close(); process.exit(1); }, 120000);
-`;
-    // Write the server script to a temp file
-    try {
-      const scriptFile = Cc["@mozilla.org/file/local;1"].createInstance(
-        Ci.nsIFile,
-      );
-      scriptFile.initWithPath(serverScriptPath);
-      await Zotero.File.putContentsAsync(serverScriptPath, serverScript);
-    } catch (err) {
-      return {
-        ok: false,
-        message: `Failed to write callback server script: ${err}`,
-      };
-    }
-
-    // Start the Node.js server in the background (hidden)
-    const nodePath =
-      (await locateExecutableViaShell("node")) || resolveExecutablePath("node");
-    if (!nodePath) {
-      return {
-        ok: false,
-        message: "Node.js not found. Install/Update Env first.",
-      };
-    }
-    const nodeCmd = buildExecutableCommand(nodePath, [serverScriptPath]);
-    const serverProcess = runShellCommand(nodeCmd, { hidden: true });
-
-    // Give the server a moment to start
-    await new Promise((r) => setTimeout(r, 1000));
-
-    // Open browser
-    try {
-      (Zotero as any).launchURL(authUrl);
-    } catch {
-      /* */
-    }
-
-    // Poll for the result file
-    const deadline = Date.now() + 120_000;
-    let code = "";
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 1000));
-      try {
-        const content = String(Zotero.File.getContents(resultFilePath) || "");
-        if (content) {
-          const result = JSON.parse(content) as {
-            code?: string;
-            error?: string;
-          };
-          if (result.error) {
-            return {
-              ok: false,
-              message: `Google OAuth error: ${result.error}`,
-            };
-          }
-          if (result.code) {
-            code = result.code;
-            break;
-          }
-        }
-      } catch {
-        /* file not yet written */
-      }
-    }
-
-    // Clean up temp files
-    try {
-      const f1 = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-      f1.initWithPath(serverScriptPath);
-      if (f1.exists()) f1.remove(false);
-    } catch {
-      /* */
-    }
-    try {
-      const f2 = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-      f2.initWithPath(resultFilePath);
-      if (f2.exists()) f2.remove(false);
-    } catch {
-      /* */
-    }
-
-    // Wait for the server process to finish
-    try {
-      await serverProcess;
-    } catch {
-      /* */
-    }
-
-    if (!code) {
-      return {
-        ok: false,
-        message: "OAuth callback timeout — no authorization code received",
-      };
-    }
-
-    // Exchange code for tokens
-    const tokenBody = new URLSearchParams({
-      client_id: creds.clientId,
-      client_secret: creds.clientSecret,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: GEMINI_REDIRECT_URI,
-      code_verifier: verifier,
-    });
-    const tokenRes = await getFetch()(GEMINI_TOKEN_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-      },
-      body: tokenBody.toString(),
-    });
-    if (!tokenRes.ok) {
-      return {
-        ok: false,
-        message: `Token exchange failed: ${await tokenRes.text()}`,
-      };
-    }
-    const tokenData = (await tokenRes.json()) as unknown as {
-      access_token: string;
-      refresh_token?: string;
-      expires_in: number;
-      scope?: string;
-    };
-    if (!tokenData.access_token) {
-      return { ok: false, message: "No access token received" };
-    }
-
-    // Discover GCP project (same as reference — required for API access)
-    let projectId = "";
-    try {
-      projectId = await discoverGeminiProject(tokenData.access_token);
-    } catch (err) {
-      ztoolkit?.log?.("AIdea: Gemini project discovery failed", err);
-    }
-
-    const expiresAt = Date.now() + (tokenData.expires_in || 3600) * 1000;
-    setOAuthPref("geminiOAuthAccessToken", tokenData.access_token);
-    setOAuthPref("geminiOAuthRefreshToken", tokenData.refresh_token || "");
-    setOAuthPref("geminiOAuthExpiresAt", String(expiresAt));
-    setOAuthPref(
-      "geminiOAuthScope",
-      tokenData.scope || GEMINI_SCOPES.join(" "),
-    );
-    setOAuthPref("geminiOAuthProjectId", projectId);
-    return {
-      ok: true,
-      message: `Gemini OAuth ready${projectId ? ` (project: ${projectId})` : ""}`,
-    };
-  } catch (err) {
-    return { ok: false, message: `Gemini OAuth failed: ${String(err)}` };
-  }
-}
-
-/**
- * Project discovery aligned with the reference implementation
- * (openclaw/extensions/google/oauth.project.ts → discoverProject).
- *
- * Uses IDE_UNSPECIFIED as ideType so the API returns projects that were
- * provisioned by any IDE or the Gemini CLI.  Tries multiple Code Assist
- * endpoints (prod → daily → autopush) and sends cloudaicompanionProject
- * in the loadCodeAssist body when an env-var project is available.
- */
-async function discoverGeminiProject(accessToken: string): Promise<string> {
-  const fetchFn = getFetch();
-  const ENDPOINTS = [
-    "https://cloudcode-pa.googleapis.com",
-    "https://daily-cloudcode-pa.sandbox.googleapis.com",
-    "https://autopush-cloudcode-pa.sandbox.googleapis.com",
-  ];
-  // Match the reference exactly: IDE_UNSPECIFIED + PLATFORM_UNSPECIFIED
-  const metadata = {
-    ideType: "IDE_UNSPECIFIED",
-    platform: "PLATFORM_UNSPECIFIED",
-    pluginType: "GEMINI",
-  };
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
-    "Content-Type": "application/json",
-    "User-Agent": "google-api-nodejs-client/9.15.1",
-    "X-Goog-Api-Client": "gl-node/20.0.0",
-    "Client-Metadata": JSON.stringify(metadata),
-  };
-
-  // Check env-var project upfront (used in loadCodeAssist body per reference)
-  let envProject = "";
-  try {
-    envProject =
-      getEnv("GOOGLE_CLOUD_PROJECT") || getEnv("GOOGLE_CLOUD_PROJECT_ID") || "";
-  } catch {
-    /* */
-  }
-
-  // ---- Step 1: loadCodeAssist (try multiple endpoints) ----
-  const loadBody: Record<string, unknown> = {
-    metadata: {
-      ...metadata,
-      ...(envProject ? { duetProject: envProject } : {}),
-    },
-    ...(envProject ? { cloudaicompanionProject: envProject } : {}),
-  };
-
-  type LoadData = {
-    currentTier?: { id?: string };
-    cloudaicompanionProject?: string | { id?: string };
-    allowedTiers?: Array<{ id?: string; isDefault?: boolean }>;
-  };
-  let data: LoadData = {};
-  let activeEndpoint = ENDPOINTS[0];
-  let loadSucceeded = false;
-
-  for (const ep of ENDPOINTS) {
-    try {
-      ztoolkit?.log?.(
-        "AIdea: Gemini project discovery - calling loadCodeAssist at",
-        ep,
-      );
-      const loadRes = await fetchFn(`${ep}/v1internal:loadCodeAssist`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(loadBody),
-      });
-      ztoolkit?.log?.("AIdea: loadCodeAssist status:", loadRes.status);
-      if (!loadRes.ok) {
-        const errText = await loadRes.text().catch(() => "");
-        ztoolkit?.log?.("AIdea: loadCodeAssist failed:", errText.slice(0, 300));
-        continue;
-      }
-      data = (await loadRes.json()) as unknown as LoadData;
-      ztoolkit?.log?.(
-        "AIdea: loadCodeAssist response:",
-        JSON.stringify(data).slice(0, 500),
-      );
-      activeEndpoint = ep;
-      loadSucceeded = true;
-      break;
-    } catch (err) {
-      ztoolkit?.log?.("AIdea: loadCodeAssist exception at", ep, err);
-    }
-  }
-
-  const hasData =
-    Boolean(data.currentTier) ||
-    Boolean(data.cloudaicompanionProject) ||
-    Boolean(data.allowedTiers?.length);
-  if (!loadSucceeded && !hasData) {
-    ztoolkit?.log?.("AIdea: All loadCodeAssist endpoints failed");
-    if (envProject) return envProject;
-    // Fall through to gcloud / env fallbacks below
-  }
-
-  // ---- Extract project if user is already onboarded ----
-  if (data.currentTier) {
-    const proj = data.cloudaicompanionProject;
-    if (typeof proj === "string" && proj) {
-      ztoolkit?.log?.("AIdea: Found project (string):", proj);
-      return proj;
-    }
-    if (typeof proj === "object" && proj?.id) {
-      ztoolkit?.log?.("AIdea: Found project (object):", proj.id);
-      return proj.id;
-    }
-    ztoolkit?.log?.(
-      "AIdea: Has tier but no project in response. Tier:",
-      data.currentTier.id,
-    );
-    // Already onboarded but project not in response — need env/gcloud fallback
-    if (envProject) return envProject;
-  }
-
-  // ---- Step 2: onboardUser (provision new project for free-tier users) ----
-  if (hasData) {
-    const defaultTier = data.allowedTiers?.find((t) => t.isDefault);
-    const tierId = defaultTier?.id || "free-tier";
-    ztoolkit?.log?.("AIdea: onboarding with tier:", tierId);
-
-    const onboardBody: Record<string, unknown> = {
-      tierId,
-      metadata: {
-        ...metadata,
-        ...(tierId !== "free-tier" && envProject
-          ? { duetProject: envProject }
-          : {}),
-      },
-      ...(tierId !== "free-tier" && envProject
-        ? { cloudaicompanionProject: envProject }
-        : {}),
-    };
-    try {
-      const onboardRes = await fetchFn(
-        `${activeEndpoint}/v1internal:onboardUser`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify(onboardBody),
-        },
-      );
-      ztoolkit?.log?.("AIdea: onboardUser status:", onboardRes.status);
-
-      if (onboardRes.ok) {
-        let lro = (await onboardRes.json()) as unknown as {
-          done?: boolean;
-          name?: string;
-          response?: { cloudaicompanionProject?: { id?: string } };
-        };
-        ztoolkit?.log?.(
-          "AIdea: onboardUser response:",
-          JSON.stringify(lro).slice(0, 500),
-        );
-
-        // Poll operation if not done
-        if (!lro.done && lro.name) {
-          ztoolkit?.log?.("AIdea: Polling operation:", lro.name);
-          for (let i = 0; i < 24; i++) {
-            await new Promise((r) => setTimeout(r, 5000));
-            const pollRes = await fetchFn(
-              `${activeEndpoint}/v1internal/${lro.name}`,
-              { headers },
-            );
-            if (pollRes.ok) {
-              lro = (await pollRes.json()) as unknown as typeof lro;
-              ztoolkit?.log?.(
-                "AIdea: Poll result:",
-                JSON.stringify(lro).slice(0, 300),
-              );
-              if (lro.done) break;
-            }
-          }
-        }
-        const projId = lro.response?.cloudaicompanionProject?.id;
-        ztoolkit?.log?.(
-          "AIdea: Final project ID from onboard:",
-          projId || "(empty)",
-        );
-        if (projId) return projId;
-      } else {
-        const errText = await onboardRes.text().catch(() => "");
-        ztoolkit?.log?.("AIdea: onboardUser failed:", errText.slice(0, 300));
-      }
-    } catch (err) {
-      ztoolkit?.log?.("AIdea: onboardUser exception:", err);
-    }
-  }
-
-  // ---- Fallback 1: try gcloud CLI ----
-  try {
-    const gcloud = await runShellCommand("gcloud config get-value project", {
-      hidden: true,
-    });
-    const gcloudProj = gcloud.stdout?.trim();
-    if (gcloudProj && !gcloudProj.includes("(unset)")) {
-      ztoolkit?.log?.("AIdea: Got project from gcloud:", gcloudProj);
-      return gcloudProj;
-    }
-  } catch {
-    /* gcloud not installed */
-  }
-
-  // ---- Fallback 2: environment variable ----
-  if (envProject) {
-    ztoolkit?.log?.("AIdea: Got project from env:", envProject);
-    return envProject;
-  }
-
-  return "";
 }
 
 // ---------- GitHub Copilot Device Code Flow ----------
@@ -4075,14 +3278,9 @@ export async function runProviderOAuthLogin(
   provider: OAuthProviderId,
 ): Promise<{ ok: boolean; message: string }> {
   await ensureZoteroProxyFromSystem({ forceRefresh: true });
-  // Qwen and Copilot use in-plugin Device Code flows
+  // Copilot uses an in-plugin Device Code flow
 
   if (provider === "github-copilot") return loginCopilotDeviceCode();
-
-  // Gemini: in-plugin OAuth Authorization Code + PKCE flow.
-  if (provider === "google-gemini-cli") {
-    return loginGeminiInPlugin();
-  }
 
   // Codex uses external CLI tool (hidden mode)
   const spec = getProviderCliSpec(provider);
@@ -4143,31 +3341,11 @@ export async function removeProviderOAuthCredential(
       message: `${getProviderLabel(provider)} authorization removed`,
     };
   }
-  // Gemini: also clear in-plugin OAuth prefs
-  if (provider === "google-gemini-cli") {
-    setOAuthPref("geminiOAuthAccessToken", "");
-    setOAuthPref("geminiOAuthRefreshToken", "");
-    setOAuthPref("geminiOAuthExpiresAt", "");
-    setOAuthPref("geminiOAuthScope", "");
-    setOAuthPref("geminiOAuthProjectId", "");
-  }
   const home = homeDir();
   if (!home) {
-    if (provider === "google-gemini-cli") {
-      return {
-        ok: true,
-        message: `${getProviderLabel(provider)} authorization removed`,
-      };
-    }
     return { ok: false, message: "Home directory not found" };
   }
-  const paths =
-    provider === "openai-codex"
-      ? [joinPath(home, ".codex", "auth.json")]
-      : [
-          joinPath(home, ".gemini", "oauth_creds.json"),
-          joinPath(home, ".gemini", "credentials.json"),
-        ];
+  const paths = [joinPath(home, ".codex", "auth.json")];
   let removed = 0;
   for (const path of paths) {
     if (removeFileIfExists(path)) removed += 1;
@@ -4175,7 +3353,7 @@ export async function removeProviderOAuthCredential(
   return {
     ok: true,
     message:
-      removed > 0 || provider === "google-gemini-cli"
+      removed > 0
         ? `${getProviderLabel(provider)} authorization removed`
         : `${getProviderLabel(provider)} authorization file not found`,
   };
@@ -4682,7 +3860,7 @@ export async function getProviderAuthStatus(
     }
   }
 
-  // Qwen / Copilot / Gemini �?generic status with optional expiry
+  // Copilot — generic status with optional expiry
   const parts: string[] = ["Logged in"];
   if (cred.projectId) {
     parts.push(`project: ${cred.projectId}`);
@@ -4729,21 +3907,6 @@ export async function getProviderAccountSummary(
           : cred.accountId || "ChatGPT OAuth";
     } else {
       account = cred.accountId || "ChatGPT OAuth";
-    }
-  } else if (provider === "google-gemini-cli") {
-    // Gemini: try to read client_email or account from the credential file
-    const home = homeDir();
-    if (home) {
-      const data = await readJsonFile(
-        joinPath(home, ".gemini", "oauth_creds.json"),
-      );
-      const email = data?.client_email || data?.account || data?.email;
-      account =
-        typeof email === "string" && email.trim()
-          ? email.trim()
-          : cred.projectId || "Google OAuth";
-    } else {
-      account = cred.projectId || "Google OAuth";
     }
   } else if (provider === "github-copilot") {
     account = "GitHub OAuth";
@@ -5255,200 +4418,6 @@ function parseCodexSSERaw(
 }
 
 /**
- * Parse a streaming SSE response from the Gemini streamGenerateContent endpoint.
- * Each SSE event is a JSON object with candidates[].content.parts[].text.
- */
-async function parseGeminiSSEStream(
-  body: ReadableStream<Uint8Array>,
-  onDelta?: (delta: string) => void,
-): Promise<string> {
-  const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-  let fullText = "";
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const data = trimmed.slice(5).trim();
-        if (!data || data === "[DONE]") continue;
-
-        try {
-          const parsed = JSON.parse(data) as any;
-          const parts = extractGeminiResponseTextParts(parsed);
-          for (const text of parts) {
-            fullText += text;
-            onDelta?.(text);
-          }
-        } catch {
-          // skip non-JSON data lines
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return fullText;
-}
-
-function generateGeminiUserPromptId(): string {
-  const bytes = new Uint8Array(8);
-  const cryptoApi = (globalThis as any).crypto;
-  if (typeof cryptoApi?.getRandomValues === "function") {
-    cryptoApi.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  const suffix = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
-    "",
-  );
-  return `aidea-${Date.now().toString(36)}-${suffix}`;
-}
-
-function buildGeminiOAuthPromptText(params: {
-  prompt: string;
-  context?: string;
-  history?: Array<{ role: "user" | "assistant" | "system"; content: any }>;
-  systemPrompt?: string;
-}): string {
-  const userParts: string[] = [];
-  if (params.systemPrompt?.trim()) {
-    userParts.push(`System:\n${params.systemPrompt.trim()}`);
-  }
-  if (params.context?.trim()) {
-    userParts.push(`Document Context:\n${params.context.trim()}`);
-  }
-  for (const msg of params.history || []) {
-    const content =
-      typeof msg.content === "string"
-        ? msg.content
-        : JSON.stringify(msg.content);
-    if (!content.trim()) continue;
-    userParts.push(
-      `${msg.role === "assistant" ? "Assistant" : msg.role === "system" ? "System" : "User"}:\n${content}`,
-    );
-  }
-  userParts.push(`User:\n${params.prompt}`);
-  return userParts.join("\n\n");
-}
-
-export function buildGeminiCodeAssistRequestPayload(params: {
-  model: string;
-  prompt: string;
-  projectId: string;
-  context?: string;
-  history?: Array<{ role: "user" | "assistant" | "system"; content: any }>;
-  systemPrompt?: string;
-  temperature?: number;
-  maxTokens?: number;
-}): Record<string, unknown> {
-  const modelId = params.model.replace(/^models\//, "");
-  const request: Record<string, unknown> = {
-    contents: [
-      { role: "user", parts: [{ text: buildGeminiOAuthPromptText(params) }] },
-    ],
-  };
-
-  const generationConfig: Record<string, unknown> = {};
-  if (
-    typeof params.temperature === "number" &&
-    Number.isFinite(params.temperature)
-  ) {
-    generationConfig.temperature = params.temperature;
-  }
-  if (
-    typeof params.maxTokens === "number" &&
-    Number.isFinite(params.maxTokens)
-  ) {
-    generationConfig.maxOutputTokens = Math.max(
-      1,
-      Math.round(params.maxTokens),
-    );
-  }
-  if (Object.keys(generationConfig).length > 0) {
-    request.generationConfig = generationConfig;
-  }
-
-  return {
-    model: modelId,
-    project: params.projectId,
-    user_prompt_id: generateGeminiUserPromptId(),
-    request,
-  };
-}
-
-function extractGeminiResponseTextParts(data: unknown): string[] {
-  const root = data && typeof data === "object" ? (data as any) : null;
-  const candidates = Array.isArray(root?.candidates)
-    ? root.candidates
-    : Array.isArray(root?.response?.candidates)
-      ? root.response.candidates
-      : [];
-  return candidates
-    .flatMap((candidate: any) =>
-      Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [],
-    )
-    .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
-    .filter(Boolean);
-}
-
-export function extractGeminiResponseText(data: unknown): string {
-  return extractGeminiResponseTextParts(data).join("\n");
-}
-
-function buildGeminiCodeAssistHeaders(
-  cred: OAuthCredential,
-  model: string,
-): Record<string, string> {
-  const platform = currentPlatform();
-  const modelId = model.replace(/^models\//, "");
-  const platformLabel = platform === "macos" ? "darwin" : platform;
-  return {
-    Authorization: `Bearer ${cred.accessToken}`,
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-    "User-Agent": `AIdea/1.0/${modelId} (${platformLabel})`,
-  };
-}
-
-async function parseGeminiSSEText(
-  raw: string,
-  onDelta?: (delta: string) => void,
-): Promise<string> {
-  let fullText = "";
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data:")) continue;
-    const data = trimmed.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
-
-    try {
-      const parsed = JSON.parse(data);
-      const parts = extractGeminiResponseTextParts(parsed);
-      for (const text of parts) {
-        fullText += text;
-        onDelta?.(text);
-      }
-    } catch {
-      // skip non-JSON data lines
-    }
-  }
-  return fullText;
-}
-
-/**
  * Parse a standard OpenAI-compatible SSE stream (choices[0].delta.content).
  * Used by Qwen and GitHub Copilot.
  */
@@ -5622,6 +4591,84 @@ async function parseAnthropicSSEStream(
   return fullText;
 }
 
+export type OAuthReasoningConfig = {
+  provider: ReasoningProvider;
+  level: ReasoningLevel;
+};
+
+/**
+ * Resolve an OpenAI-style reasoning effort for an OAuth request, or null when
+ * the selected level maps to the provider default or the model family has no
+ * effort-style parameter.
+ */
+function resolveOAuthReasoningEffort(
+  reasoning: OAuthReasoningConfig | undefined,
+  model: string,
+): string | null {
+  if (!reasoning) return null;
+  if (reasoning.provider !== "openai" && reasoning.provider !== "grok") {
+    return null;
+  }
+  if (!supportsReasoningForModel(reasoning.provider, model)) return null;
+  const profile =
+    reasoning.provider === "grok"
+      ? getGrokReasoningProfileForModel(model)
+      : getOpenAIReasoningProfileForModel(model);
+  const effort = profile.levelToEffort[reasoning.level];
+  return typeof effort === "string" && effort !== "default" ? effort : null;
+}
+
+function resolveOAuthAnthropicThinkingBudget(
+  reasoning: OAuthReasoningConfig | undefined,
+  model: string,
+): number | null {
+  if (!reasoning || reasoning.provider !== "anthropic") return null;
+  if (!supportsReasoningForModel("anthropic", model)) return null;
+  const profile = getAnthropicReasoningProfileForModel(model);
+  const budget =
+    profile.levelToBudgetTokens[reasoning.level] ?? profile.defaultBudgetTokens;
+  return Math.max(1024, Math.floor(budget));
+}
+
+function isReasoningRejectionError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  return (
+    /\b(?:400|422)\b/.test(message) &&
+    /reasoning|thinking|effort/i.test(message)
+  );
+}
+
+/**
+ * Post a Copilot request; if the upstream rejects the reasoning parameters
+ * with a 400/422, retry once with those parameters stripped.
+ */
+async function postCopilotWithReasoningFallback(params: {
+  url: string;
+  headers: Record<string, string>;
+  payload: Record<string, unknown>;
+  signal?: AbortSignal;
+  reasoningKeys: string[];
+}): Promise<Response> {
+  try {
+    return await postCopilotWithTemperatureFallback(params);
+  } catch (err) {
+    const hasReasoning = params.reasoningKeys.some((key) =>
+      Object.prototype.hasOwnProperty.call(params.payload, key),
+    );
+    if (!hasReasoning || !isReasoningRejectionError(err)) throw err;
+    ztoolkit?.log?.(
+      "AIdea: Copilot rejected reasoning params; retrying without them",
+      err,
+    );
+    const fallbackPayload = { ...params.payload };
+    for (const key of params.reasoningKeys) delete fallbackPayload[key];
+    return postCopilotWithTemperatureFallback({
+      ...params,
+      payload: fallbackPayload,
+    });
+  }
+}
+
 export async function chatWithProviderOAuth(params: {
   provider: OAuthProviderId;
   model: string;
@@ -5634,6 +4681,7 @@ export async function chatWithProviderOAuth(params: {
   temperature?: number;
   images?: string[];
   imageGeneration?: boolean;
+  reasoning?: OAuthReasoningConfig;
   onDelta?: (delta: string) => void;
 }): Promise<string> {
   const cred = await readProviderOAuthCredential(params.provider);
@@ -5658,6 +4706,14 @@ export async function chatWithProviderOAuth(params: {
       stream: true,
     };
     payload.tools = [{ type: "image_generation" }];
+    const codexEffort = resolveOAuthReasoningEffort(
+      params.reasoning,
+      params.model,
+    );
+    if (codexEffort) {
+      // Same shape the first-party Codex CLI sends to the Responses backend.
+      payload.reasoning = { effort: codexEffort, summary: "auto" };
+    }
     logOAuthRequestParameterPolicy({
       provider: params.provider,
       model: params.model,
@@ -5670,27 +4726,48 @@ export async function chatWithProviderOAuth(params: {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     };
-    const res = await fetchWithTransientRetry(
-      getFetch(),
-      "https://chatgpt.com/backend-api/codex/responses",
-      {
-        method: "POST",
-        headers: codexHeaders,
-        body: JSON.stringify(payload),
-        signal: params.signal,
-      },
-      {
-        signal: params.signal,
-        onRetry: ({ attempt, maxAttempts, error }) => {
-          ztoolkit?.log?.(
-            `AIdea: Codex OAuth transient upstream error, retry ${attempt}/${maxAttempts - 1}`,
-            error,
-          );
+    const postCodexPayload = (requestPayload: Record<string, unknown>) =>
+      fetchWithTransientRetry(
+        getFetch(),
+        "https://chatgpt.com/backend-api/codex/responses",
+        {
+          method: "POST",
+          headers: codexHeaders,
+          body: JSON.stringify(requestPayload),
+          signal: params.signal,
         },
-      },
-    );
+        {
+          signal: params.signal,
+          onRetry: ({ attempt, maxAttempts, error }) => {
+            ztoolkit?.log?.(
+              `AIdea: Codex OAuth transient upstream error, retry ${attempt}/${maxAttempts - 1}`,
+              error,
+            );
+          },
+        },
+      );
+    let res = await postCodexPayload(payload);
     if (!res.ok) {
-      throw new Error(`Codex OAuth HTTP ${res.status}: ${await res.text()}`);
+      const errText = await res.text();
+      if (
+        payload.reasoning &&
+        (res.status === 400 || res.status === 422) &&
+        /reasoning|effort/i.test(errText)
+      ) {
+        ztoolkit?.log?.(
+          "AIdea: Codex rejected reasoning params; retrying without them",
+        );
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.reasoning;
+        res = await postCodexPayload(fallbackPayload);
+        if (!res.ok) {
+          throw new Error(
+            `Codex OAuth HTTP ${res.status}: ${await res.text()}`,
+          );
+        }
+      } else {
+        throw new Error(`Codex OAuth HTTP ${res.status}: ${errText}`);
+      }
     }
     // Stream SSE �?read body incrementally, call onDelta per chunk
     if (res.body) {
@@ -5746,6 +4823,21 @@ export async function chatWithProviderOAuth(params: {
         params.model,
         params.temperature,
       );
+      const thinkingBudget = resolveOAuthAnthropicThinkingBudget(
+        params.reasoning,
+        params.model,
+      );
+      if (thinkingBudget !== null) {
+        anthropicPayload.thinking = {
+          type: "enabled",
+          budget_tokens: thinkingBudget,
+        };
+        // Anthropic requires max_tokens to exceed the thinking budget.
+        const currentMaxTokens = Number(anthropicPayload.max_tokens) || 8192;
+        if (currentMaxTokens <= thinkingBudget) {
+          anthropicPayload.max_tokens = thinkingBudget + 4096;
+        }
+      }
       if (params.systemPrompt?.trim()) {
         anthropicPayload.system = params.systemPrompt.trim();
       }
@@ -5763,11 +4855,12 @@ export async function chatWithProviderOAuth(params: {
         ...copilotBaseHeaders,
         Accept: "text/event-stream",
       };
-      const res = await postCopilotWithTemperatureFallback({
+      const res = await postCopilotWithReasoningFallback({
         url: anthropicUrl,
         headers: anthropicHeaders,
         payload: anthropicPayload,
         signal: params.signal,
+        reasoningKeys: ["thinking"],
       });
       if (res.body) {
         return parseAnthropicSSEStream(res.body, params.onDelta);
@@ -5809,6 +4902,13 @@ export async function chatWithProviderOAuth(params: {
         params.model,
         params.temperature,
       );
+      const chatEffort = resolveOAuthReasoningEffort(
+        params.reasoning,
+        params.model,
+      );
+      if (chatEffort) {
+        chatPayload.reasoning_effort = chatEffort;
+      }
       logOAuthRequestParameterPolicy({
         provider: params.provider,
         model: params.model,
@@ -5823,11 +4923,12 @@ export async function chatWithProviderOAuth(params: {
         ...copilotBaseHeaders,
         Accept: "text/event-stream",
       };
-      const res = await postCopilotWithTemperatureFallback({
+      const res = await postCopilotWithReasoningFallback({
         url: chatUrl,
         headers: chatHeaders,
         payload: chatPayload,
         signal: params.signal,
+        reasoningKeys: ["reasoning_effort"],
       });
       if (res.body) {
         return parseOpenAICompatSSEStream(res.body, params.onDelta);
@@ -5861,6 +4962,13 @@ export async function chatWithProviderOAuth(params: {
       params.model,
       params.temperature,
     );
+    const responsesEffort = resolveOAuthReasoningEffort(
+      params.reasoning,
+      params.model,
+    );
+    if (responsesEffort) {
+      responsesPayload.reasoning = { effort: responsesEffort };
+    }
     if (params.systemPrompt?.trim()) {
       responsesPayload.instructions = params.systemPrompt.trim();
     }
@@ -5878,11 +4986,12 @@ export async function chatWithProviderOAuth(params: {
       ...copilotBaseHeaders,
       Accept: "text/event-stream",
     };
-    const res = await postCopilotWithTemperatureFallback({
+    const res = await postCopilotWithReasoningFallback({
       url: copilotUrl,
       headers: copilotHeaders,
       payload: responsesPayload,
       signal: params.signal,
+      reasoningKeys: ["reasoning"],
     });
     // Reuse the Codex SSE parser — same response.output_text.delta event format
     if (res.body) {
@@ -5894,121 +5003,7 @@ export async function chatWithProviderOAuth(params: {
     return parseCodexSSERaw(raw, params.onDelta);
   }
 
-  // ---------- Google Gemini CLI (Cloud Code Assist streaming) ----------
-  // Lazy project discovery: if we have a token but no project ID,
-  // attempt automatic discovery and cache the result before giving up.
-  let geminiProjectId = cred.projectId || "";
-  if (!geminiProjectId && cred.accessToken) {
-    try {
-      ztoolkit?.log?.("AIdea: Gemini lazy project discovery starting...");
-      const discovered = await discoverGeminiProject(cred.accessToken);
-      if (discovered) {
-        geminiProjectId = discovered;
-        setOAuthPref("geminiOAuthProjectId", discovered);
-        ztoolkit?.log?.("AIdea: Lazy project discovery succeeded:", discovered);
-      }
-    } catch (err) {
-      ztoolkit?.log?.("AIdea: Lazy project discovery failed:", err);
-    }
-  }
-  if (!geminiProjectId) {
-    throw new Error(
-      "Gemini OAuth: no GCP project ID found. Try:\n" +
-        "1. Remove Auth → OAuth Login (re-authorize)\n" +
-        "2. Or install gcloud CLI and run: gcloud config set project YOUR_PROJECT_ID\n" +
-        "3. Or set env var GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID",
-    );
-  }
-  const geminiPayload = buildGeminiCodeAssistRequestPayload({
-    model: params.model,
-    prompt: params.prompt,
-    projectId: geminiProjectId,
-    context: params.context,
-    history: params.history,
-    systemPrompt: params.systemPrompt,
-    temperature: params.temperature,
-    maxTokens: params.maxTokens,
-  });
-  const geminiRequest =
-    typeof geminiPayload.request === "object" && geminiPayload.request
-      ? (geminiPayload.request as Record<string, unknown>)
-      : {};
-  const geminiGenerationConfig =
-    typeof geminiRequest.generationConfig === "object" &&
-    geminiRequest.generationConfig
-      ? (geminiRequest.generationConfig as Record<string, unknown>)
-      : {};
-  logOAuthRequestParameterPolicy({
-    provider: params.provider,
-    model: params.model,
-    endpointType: "gemini-code-assist",
-    payload: geminiPayload,
-    parameterSource: getOAuthOptionalParameterSource({
-      temperature: params.temperature,
-      maxTokens: params.maxTokens,
-    }),
-    temperatureSent: Object.prototype.hasOwnProperty.call(
-      geminiGenerationConfig,
-      "temperature",
-    ),
-    tokenParam: Object.prototype.hasOwnProperty.call(
-      geminiGenerationConfig,
-      "maxOutputTokens",
-    )
-      ? {
-          field: "generationConfig.maxOutputTokens",
-          value: geminiGenerationConfig.maxOutputTokens,
-        }
-      : undefined,
-  });
-
-  // Helper to execute the Gemini streaming request with a given credential
-  const executeGeminiRequest = async (activeCred: OAuthCredential) => {
-    return fetchWithTransientRetry(
-      getFetch(),
-      GEMINI_CODE_ASSIST_STREAM_URL,
-      {
-        method: "POST",
-        headers: buildGeminiCodeAssistHeaders(activeCred, params.model),
-        body: JSON.stringify(geminiPayload),
-        signal: params.signal,
-      },
-      {
-        signal: params.signal,
-        onRetry: ({ attempt, maxAttempts, error }) => {
-          ztoolkit?.log?.(
-            `AIdea: Gemini OAuth transient upstream error, retry ${attempt}/${maxAttempts - 1}`,
-            error,
-          );
-        },
-      },
-    );
-  };
-
-  let res = await executeGeminiRequest(cred);
-
-  // Retry on 401: refresh token and try once more
-  if (res.status === 401 && cred.refreshToken) {
-    ztoolkit?.log?.(
-      "AIdea: Gemini 401 — attempting token refresh and retry...",
-    );
-    const refreshed = await refreshGeminiAccessToken(cred);
-    if (refreshed) {
-      res = await executeGeminiRequest(refreshed);
-    }
-  }
-
-  if (!res.ok) {
-    throw new Error(`Gemini OAuth HTTP ${res.status}: ${await res.text()}`);
-  }
-  if (res.body) {
-    const streamed = await parseGeminiSSEStream(res.body, params.onDelta);
-    return streamed;
-  }
-  const raw = await res.text();
-  const streamed = await parseGeminiSSEText(raw, params.onDelta);
-  if (streamed) return streamed;
-  return "";
+  throw new Error(`Unsupported OAuth provider: ${params.provider}`);
 }
 
 export async function callProviderEmbeddingsUnsupported(): Promise<never> {
@@ -6042,17 +5037,6 @@ export async function getOAuthProviderPingInfo(
         ...ensureProviderAuthHeaderInit(cred),
         "Content-Type": "application/json",
       },
-    };
-  }
-
-  if (provider === "google-gemini-cli") {
-    // Gemini CLI uses Code Assist streaming API.
-    // Return credential info so the caller can use pingGeminiModel.
-    const projectId = cred.projectId || "";
-    return {
-      apiBase: GEMINI_CODE_ASSIST_API_BASE,
-      headers: buildGeminiCodeAssistHeaders(cred, "gemini-2.5-flash"),
-      projectId,
     };
   }
 
@@ -6162,37 +5146,6 @@ export async function pingCodexModel(
       }
     }
     // Any non-network response means token is at least partially valid
-    return res.status !== 401 && res.status !== 403 ? "ok" : "fail";
-  } catch {
-    return "fail";
-  }
-}
-
-/**
- * Ping the Gemini Code Assist API to validate the OAuth token.
- * Sends a minimal streamGenerateContent request with a tiny prompt.
- * All Gemini models share the same token, so one ping validates all.
- * Returns "ok" if the token is valid, "fail" otherwise.
- */
-export async function pingGeminiModel(
-  headers: Record<string, string>,
-  projectId: string,
-): Promise<"ok" | "fail"> {
-  try {
-    const payload = buildGeminiCodeAssistRequestPayload({
-      model: "gemini-2.5-flash",
-      prompt: "hi",
-      projectId,
-    });
-    const fetchPromise = getFetch()(GEMINI_CODE_ASSIST_STREAM_URL, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
-    const timeoutPromise = new Promise<Response>((_resolve, reject) =>
-      setTimeout(() => reject(new Error("ping timeout")), 15_000),
-    );
-    const res = await Promise.race([fetchPromise, timeoutPromise]);
     return res.status !== 401 && res.status !== 403 ? "ok" : "fail";
   } catch {
     return "fail";

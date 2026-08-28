@@ -1033,6 +1033,9 @@ export {
   getGeminiReasoningProfileForModel as getGeminiReasoningProfile,
   getAnthropicReasoningProfileForModel as getAnthropicReasoningProfile,
   getQwenReasoningProfileForModel as getQwenReasoningProfile,
+  supportsReasoningForModel,
+  getReasoningDefaultLevelForModel,
+  inferReasoningProviderFromModel,
 } from "./reasoningProfiles";
 
 // Local aliases for internal use (re-exports above don't create local bindings)
@@ -1987,6 +1990,7 @@ export async function callLLM(params: ChatParams): Promise<string> {
       maxTokens: params.maxTokens,
       temperature: params.temperature,
       images: params.images,
+      reasoning: params.reasoning,
     });
     return normalizeModelOutput(rawText).text;
   }
@@ -2251,6 +2255,7 @@ export async function callLLMStream(
       maxTokens: params.maxTokens,
       temperature: params.temperature,
       images: params.images,
+      reasoning: params.reasoning,
       onDelta: rawOnDelta,
     });
     return finishNormalizedOutput(rawText);

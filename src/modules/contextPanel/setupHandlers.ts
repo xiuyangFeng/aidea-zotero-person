@@ -26,6 +26,7 @@ import {
 import {
   selectedModelCache,
   selectedModelProviderCache,
+  selectedReasoningLevelCache,
   selectedImageCache,
   selectedFileAttachmentCache,
   selectedImagePreviewExpandedCache,
@@ -69,6 +70,7 @@ import {
   getApiProfiles,
   getPrimaryConnectionMode,
   getSelectedProfileForItem,
+  getAdvancedModelParamsForProfile,
   applyPanelFontScale,
   applyPanelTypography,
   getLastUsedModelProfileKey,
@@ -115,7 +117,10 @@ import {
   setSelectedTextContexts,
   setSelectedTextExpandedIndex,
 } from "./contextResolution";
-import { resolvePaperContextRefFromAttachment } from "./paperAttribution";
+import {
+  resolvePaperContextRefFromAttachment,
+  resolvePaperContextRefFromLibraryItem,
+} from "./paperAttribution";
 import { getReaderDocumentCapabilities } from "./documentContext";
 import { getDocumentAdapterForItem } from "./document/registry";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
@@ -158,8 +163,10 @@ import {
   collectAndDeleteUnreferencedBlobs,
 } from "../../utils/attachmentRefStore";
 import type {
+  AdvancedModelParams,
   ChatAttachment,
   PaperContextRef,
+  ReasoningSelection,
   SelectedTextContext,
 } from "./types";
 import {
@@ -172,11 +179,14 @@ import {
   isGlobalPortalItem,
   resolveActiveLibraryID,
 } from "./portalScope";
+import { getLibrarySelectedItemIdsFromWindow } from "./librarySelection";
+import { getZoteroItem } from "../../utils/zoteroItems";
 import { getPanelDomRefs } from "./setupHandlers/domRefs";
 import { getPanelI18n } from "./i18n";
 import { pickChatInputPlaceholder } from "./placeholderTips";
 import {
   MODEL_MENU_OPEN_CLASS,
+  REASONING_MENU_OPEN_CLASS,
   RETRY_MODEL_MENU_OPEN_CLASS,
   SLASH_MENU_OPEN_CLASS,
   isFloatingMenuOpen,
@@ -184,9 +194,16 @@ import {
   setFloatingMenuOpen,
 } from "./setupHandlers/controllers/menuController";
 import {
+  getReasoningDefaultLevelForModel,
+  getRuntimeReasoningOptions,
+  inferReasoningProviderFromModel,
+  supportsReasoningForModel,
+  type RuntimeReasoningOption,
+} from "../../utils/llmClient";
+import {
   getScreenshotDisabledHint,
   isScreenshotUnsupportedModel,
-} from "./setupHandlers/controllers/modelReasoningController";
+} from "./setupHandlers/controllers/screenshotPolicyController";
 import {
   GLOBAL_HISTORY_UNDO_WINDOW_MS,
   type ConversationHistoryEntry,
@@ -217,15 +234,31 @@ import {
   persistModelName,
   persistModelProvider,
   getPersistedModelName,
+  getPersistedReasoningLevel,
+  persistReasoningLevel,
   pickBestDefaultModel,
 } from "./setupHandlers/controllers/modelSelectionController";
 import { bootstrapSettingTab } from "../preferenceScript";
 import { initTranslateTab } from "../pdfTranslator/translateTabController";
 import { createHeightSync } from "./heightSync";
+import { addManagedListener, resetManagedListeners } from "./managedListeners";
 
 const SETTING_TAB_RENDER_VERSION = "2026-06-01-font-theme-layout";
 
 export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
+  // Re-bootstrap on a persistent host must dispose the document/window-level
+  // listeners registered by the previous run before registering new ones.
+  resetManagedListeners(body);
+  const addDocScopedListener = (
+    target: EventTarget | null | undefined,
+    type: string,
+    listener: ((...args: any[]) => void) | EventListenerObject,
+    options?: boolean | AddEventListenerOptions,
+  ): void => {
+    if (!target) return;
+    addManagedListener(body, target, type, listener, options);
+  };
+
   let i18n = getPanelI18n();
   let refreshActionLayoutForLanguage = () => {
     /* assigned after action layout helpers are initialized */
@@ -236,7 +269,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   let refreshChatPlaceholderForLanguage = () => {
     /* assigned after placeholder helpers are initialized */
   };
-  body.ownerDocument?.addEventListener(
+  addDocScopedListener(
+    body.ownerDocument,
     `${config.addonRef}-ui-language-change`,
     () => {
       i18n = getPanelI18n();
@@ -283,6 +317,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     modelBtn,
     modelSlot,
     modelMenu,
+    reasoningBtn,
+    reasoningSlot,
+    reasoningMenu,
     actionsRow,
     actionsLeft,
     actionsRight,
@@ -305,6 +342,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashMenu,
     slashUploadOption,
     slashReferenceOption,
+    slashLibraryOption,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -4414,6 +4452,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   type ActionRevealState = {
     send: ActionLabelMode;
     model: ModelLabelMode;
+    reasoning: ActionLabelMode;
     screenshot: ActionLabelMode;
     selectText: ActionLabelMode;
   };
@@ -4476,6 +4515,13 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (!modelBtn || !actionsLeft) return;
     const modelLabel = modelBtn.dataset.modelLabel || "default";
     const modelHint = modelBtn.dataset.modelHint || "";
+    const reasoningLabel = reasoningBtn?.dataset.reasoningLabel || "";
+    const reasoningVisible = Boolean(
+      reasoningBtn &&
+      reasoningSlot &&
+      reasoningSlot.style.display !== "none" &&
+      reasoningLabel,
+    );
     const modelCanUseTwoLineWrap =
       [...(modelLabel || "").trim()].length >
       ACTION_LAYOUT_MODEL_WRAP_MIN_CHARS;
@@ -4501,6 +4547,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       Math.round(immediateAvailableWidth),
       modelLabel,
       modelHint,
+      reasoningVisible ? `reasoning:${reasoningLabel}` : "reasoning:hidden",
       modelCanUseTwoLineWrap ? "wrap" : "nowrap",
       uploadBtn?.disabled ? "upload-disabled" : "upload-enabled",
       selectTextBtn?.disabled ? "text-disabled" : "text-enabled",
@@ -4584,7 +4631,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const borderWidth =
         getComputedSizePx(style, "border-left-width") +
         getComputedSizePx(style, "border-right-width");
-      const chevronAllowance = button === modelBtn ? 16 : 0;
+      const chevronAllowance =
+        button === modelBtn || button === reasoningBtn ? 16 : 0;
       return Math.ceil(
         wrappedTextWidth + paddingWidth + borderWidth + chevronAllowance,
       );
@@ -4672,6 +4720,16 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         : ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX;
     };
 
+    const getReasoningWidth = (mode: ActionLabelMode) => {
+      if (!reasoningVisible || !reasoningBtn) return 0;
+      if (mode === "icon") return ACTION_LAYOUT_DROPDOWN_ICON_WIDTH_PX;
+      return getFullSlotRequiredWidth(
+        reasoningSlot,
+        reasoningBtn,
+        reasoningLabel,
+      );
+    };
+
     const getSendWidth = (mode: ActionLabelMode) => {
       if (!sendBtn) return 0;
       if (mode === "icon") {
@@ -4713,6 +4771,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           state.selectText,
         ),
         getModelWidth(state.model),
+        getReasoningWidth(state.reasoning),
       ].filter((width) => width > 0);
       const leftGap = getElementGapPx(actionsLeft);
       const leftRequiredWidth =
@@ -4765,6 +4824,16 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       modelBtn.classList.toggle("llm-model-btn-wrap-2line", false);
       modelBtn.textContent = modelLabel;
       modelBtn.title = modelHint;
+
+      if (reasoningBtn && reasoningVisible) {
+        reasoningBtn.classList.toggle("llm-reasoning-btn-collapsed", false);
+        reasoningSlot?.classList.toggle(
+          "llm-reasoning-dropdown-collapsed",
+          false,
+        );
+        reasoningBtn.textContent = reasoningLabel;
+        reasoningBtn.title = i18n.reasoningClickChoose;
+      }
     };
 
     const applyState = (state: ActionRevealState) => {
@@ -4806,46 +4875,75 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         modelBtn.title = modelHint;
       }
 
+      if (reasoningBtn && reasoningVisible) {
+        const reasoningCollapsed = state.reasoning === "icon";
+        reasoningBtn.classList.toggle(
+          "llm-reasoning-btn-collapsed",
+          reasoningCollapsed,
+        );
+        reasoningSlot?.classList.toggle(
+          "llm-reasoning-dropdown-collapsed",
+          reasoningCollapsed,
+        );
+        if (reasoningCollapsed) {
+          reasoningBtn.textContent = "";
+          reasoningBtn.title = `${i18n.reasoningClickChoose}\n${reasoningLabel}`;
+        } else {
+          reasoningBtn.textContent = reasoningLabel;
+          reasoningBtn.title = i18n.reasoningClickChoose;
+        }
+      }
+
       setPanelActionLayoutMode(getPanelLayoutMode(state));
     };
 
     const widestState: ActionRevealState = {
       send: "full",
       model: "full-single",
+      reasoning: "full",
       screenshot: "full",
       selectText: "full",
     };
     const screenshotState: ActionRevealState = {
       send: "full",
       model: "full-single",
+      reasoning: "full",
       screenshot: "full",
       selectText: "icon",
     };
     const modelState: ActionRevealState = {
       send: "full",
       model: "full-single",
+      reasoning: "full",
       screenshot: "icon",
       selectText: "icon",
+    };
+    const modelStateCompactReasoning: ActionRevealState = {
+      ...modelState,
+      reasoning: "icon",
     };
     const sendState: ActionRevealState = {
       send: "full",
       model: "icon",
+      reasoning: "icon",
       screenshot: "icon",
       selectText: "icon",
     };
     const iconOnlyState: ActionRevealState = {
       send: "icon",
       model: "icon",
+      reasoning: "icon",
       screenshot: "icon",
       selectText: "icon",
     };
 
     // Reveal order as width grows:
-    // send/cancel -> model -> screenshots -> add text.
+    // send/cancel -> model -> reasoning -> screenshots -> add text.
     const candidateStates: ActionRevealState[] = [
       widestState,
       screenshotState,
       modelState,
+      modelStateCompactReasoning,
       sendState,
       iconOnlyState,
     ];
@@ -4891,10 +4989,115 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           : i18n.modelOnlyOne
         : i18n.modelNoModels;
       modelBtn.disabled = !item || !hasModels;
+      updateReasoningButton();
       applyResponsiveActionButtonsLayout();
       updateImagePreview();
       updateChatReadinessPrompt();
     });
+  };
+
+  const getReasoningUiState = (): {
+    provider: NonNullable<ReturnType<typeof inferReasoningProviderFromModel>>;
+    options: RuntimeReasoningOption[];
+    current: RuntimeReasoningOption;
+  } | null => {
+    if (!item) return null;
+    const { currentModel } = getSelectedModelInfo();
+    const model = currentModel.trim();
+    if (!model) return null;
+    const provider = inferReasoningProviderFromModel(model);
+    if (!provider || !supportsReasoningForModel(provider, model)) return null;
+    const options = getRuntimeReasoningOptions(provider, model).filter(
+      (option) => option.enabled,
+    );
+    if (!options.length) return null;
+    const cachedLevel = selectedReasoningLevelCache.get(item.id);
+    const persistedLevel = getPersistedReasoningLevel();
+    const defaultLevel = getReasoningDefaultLevelForModel(provider, model);
+    const current =
+      options.find((option) => option.level === cachedLevel) ||
+      options.find((option) => option.level === persistedLevel) ||
+      options.find((option) => option.level === defaultLevel) ||
+      options[0];
+    return { provider, options, current };
+  };
+
+  const getCurrentReasoningSelection = (): ReasoningSelection | undefined => {
+    const state = getReasoningUiState();
+    if (!state) return undefined;
+    return { provider: state.provider, level: state.current.level };
+  };
+
+  const getAdvancedRequestParams = (): AdvancedModelParams | undefined => {
+    const profileKey = getSelectedProfile()?.key;
+    const tuning = profileKey
+      ? getAdvancedModelParamsForProfile(profileKey)
+      : undefined;
+    const reasoning = getCurrentReasoningSelection();
+    if (!tuning && !reasoning) return undefined;
+    return { ...(tuning || {}), ...(reasoning ? { reasoning } : {}) };
+  };
+
+  const updateReasoningButton = () => {
+    if (!reasoningBtn || !reasoningSlot) return;
+    const state = getReasoningUiState();
+    if (!state) {
+      if (reasoningSlot.style.display !== "none") {
+        reasoningSlot.style.display = "none";
+      }
+      reasoningBtn.dataset.reasoningLabel = "";
+      setFloatingMenuOpen(reasoningMenu, REASONING_MENU_OPEN_CLASS, false);
+      return;
+    }
+    if (reasoningSlot.style.display === "none") {
+      reasoningSlot.style.display = "";
+    }
+    reasoningBtn.disabled = !item;
+    reasoningBtn.dataset.reasoningLabel = state.current.label;
+  };
+
+  const rebuildReasoningMenu = () => {
+    if (!item || !reasoningMenu) return;
+    const state = getReasoningUiState();
+    reasoningMenu.innerHTML = "";
+    if (!state) return;
+    appendDropdownInstruction(
+      reasoningMenu,
+      i18n.reasoningSelectHint,
+      "llm-reasoning-menu-hint",
+    );
+    for (const optionState of state.options) {
+      const isSelected = optionState.level === state.current.level;
+      const optionClasses = isSelected
+        ? "llm-response-menu-item llm-model-option llm-model-option-selected"
+        : "llm-response-menu-item llm-model-option";
+      const option = createElement(
+        body.ownerDocument as Document,
+        "button",
+        optionClasses,
+        {
+          type: "button",
+          textContent: isSelected
+            ? `✓  ${optionState.label}`
+            : `    ${optionState.label}`,
+        },
+      );
+      const applyReasoningSelection = (e: Event) => {
+        if (!isPrimaryPointerEvent(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!item) return;
+        selectedReasoningLevelCache.set(item.id, optionState.level);
+        persistReasoningLevel(optionState.level);
+        setFloatingMenuOpen(reasoningMenu, REASONING_MENU_OPEN_CLASS, false);
+        reasoningBtn?.setAttribute("aria-expanded", "false");
+        updateReasoningButton();
+        applyResponsiveActionButtonsLayout();
+      };
+      option.addEventListener("pointerdown", applyReasoningSelection);
+      option.addEventListener("click", applyReasoningSelection);
+      reasoningMenu.appendChild(option);
+    }
   };
 
   const isPrimaryPointerEvent = (e: Event): boolean => {
@@ -5074,7 +5277,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           entry.model,
           resolvedProfile.apiBase,
           resolvedProfile.apiKey,
-          undefined,
+          getAdvancedRequestParams(),
         );
       };
       option.addEventListener("click", (e: Event) => {
@@ -5666,8 +5869,19 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     rebuildPaperPickerRows();
     return true;
   };
-  const upsertPaperContext = (paper: PaperContextRef): boolean => {
+  const upsertPaperContext = (
+    paper: PaperContextRef,
+    options?: { silent?: boolean },
+  ): boolean => {
     if (!item) return false;
+    // Batch imports report one summary instead of a message per paper.
+    const announce = (
+      message: string,
+      level: "ready" | "warning" | "error",
+    ) => {
+      if (options?.silent || !status) return;
+      setStatus(status, message, level);
+    };
     const selectedPapers = normalizePaperContextEntries(
       selectedPaperContextCache.get(item.id) || [],
     );
@@ -5679,24 +5893,18 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       (paper.contextItemId === pool.basePdfItemId ||
         paper.itemId === pool.basePdfItemId)
     ) {
-      if (status) setStatus(status, i18n.paperAlreadySelected, "warning");
+      announce(i18n.paperAlreadySelected, "warning");
       return false;
     }
     const duplicate = selectedPapers.some(
       (entry) => entry.contextItemId === paper.contextItemId,
     );
     if (duplicate) {
-      if (status) setStatus(status, i18n.paperAlreadySelected, "warning");
+      announce(i18n.paperAlreadySelected, "warning");
       return false;
     }
     if (selectedPapers.length >= MAX_SELECTED_PAPER_CONTEXTS) {
-      if (status) {
-        setStatus(
-          status,
-          `Paper Context up to ${MAX_SELECTED_PAPER_CONTEXTS}`,
-          "error",
-        );
-      }
+      announce(`Paper Context up to ${MAX_SELECTED_PAPER_CONTEXTS}`, "error");
       return false;
     }
     const metadata = resolvePaperContextDisplayMetadata(paper);
@@ -5711,13 +5919,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     selectedPaperContextCache.set(item.id, nextPapers);
     selectedPaperPreviewExpandedCache.set(item.id, false);
     updatePaperPreviewPreservingScroll();
-    if (status) {
-      setStatus(
-        status,
-        i18n.paperContextAdded(nextPapers.length, MAX_SELECTED_PAPER_CONTEXTS),
-        "ready",
-      );
-    }
+    announce(
+      i18n.paperContextAdded(nextPapers.length, MAX_SELECTED_PAPER_CONTEXTS),
+      "ready",
+    );
     return true;
   };
   const consumeActiveSlashToken = (): boolean => {
@@ -6220,6 +6425,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     touchPaperConversationTitle,
     getSelectedProfile,
     getCurrentModelName: () => getSelectedModelInfo().currentModel,
+    getAdvancedParams: getAdvancedRequestParams,
     isScreenshotUnsupportedModel,
     getActiveEditSession: () => activeEditSession,
     setActiveEditSession: (nextEditSession) => {
@@ -6677,6 +6883,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       }
       closeRetryModelMenu();
       closeModelMenu();
+      closeReasoningMenu();
       closeHistoryMenu();
       closeResponseMenu();
       closePromptMenu();
@@ -6712,12 +6919,63 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
+  /**
+   * Add everything currently selected in the library pane as paper context.
+   * Entries without readable attachments, duplicates, and anything beyond the
+   * context cap are reported as skipped rather than failing the whole batch.
+   */
+  const addSelectedLibraryItemsToContext = () => {
+    if (!item) return;
+    const win = body.ownerDocument?.defaultView;
+    const selectedIds = getLibrarySelectedItemIdsFromWindow(win);
+    if (!selectedIds.length) {
+      if (status) setStatus(status, i18n.noLibrarySelection, "warning");
+      return;
+    }
+
+    let added = 0;
+    let skipped = 0;
+    for (const selectedId of selectedIds) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(
+        getZoteroItem(selectedId),
+      );
+      if (!paperRef) {
+        skipped += 1;
+        continue;
+      }
+      if (upsertPaperContext(paperRef, { silent: true })) {
+        added += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+
+    if (status) {
+      setStatus(
+        status,
+        i18n.paperContextBatchAdded(added, skipped),
+        added > 0 ? "ready" : "warning",
+      );
+    }
+    inputBox.focus({ preventScroll: true });
+  };
+
+  if (slashLibraryOption) {
+    slashLibraryOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      addSelectedLibraryItemsToContext();
+    });
+  }
+
   const openModelMenu = () => {
     if (!modelMenu || !modelBtn) return;
     closeSlashMenu();
     closeRetryModelMenu();
     closePromptMenu();
     closeHistoryMenu();
+    closeReasoningMenu();
     updateModelButton();
     rebuildModelMenu();
     if (!modelMenu.childElementCount) {
@@ -6732,6 +6990,28 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     setFloatingMenuOpen(modelMenu, MODEL_MENU_OPEN_CLASS, false);
   };
 
+  const closeReasoningMenu = () => {
+    setFloatingMenuOpen(reasoningMenu, REASONING_MENU_OPEN_CLASS, false);
+    reasoningBtn?.setAttribute("aria-expanded", "false");
+  };
+
+  const openReasoningMenu = () => {
+    if (!reasoningMenu || !reasoningBtn) return;
+    closeSlashMenu();
+    closeRetryModelMenu();
+    closePromptMenu();
+    closeHistoryMenu();
+    closeModelMenu();
+    rebuildReasoningMenu();
+    if (!reasoningMenu.childElementCount) {
+      closeReasoningMenu();
+      return;
+    }
+    positionFloatingMenu(body, reasoningMenu, reasoningBtn);
+    setFloatingMenuOpen(reasoningMenu, REASONING_MENU_OPEN_CLASS, true);
+    reasoningBtn.setAttribute("aria-expanded", "true");
+  };
+
   const openRetryModelMenu = (anchor: HTMLButtonElement) => {
     if (!item || !retryModelMenu) return;
     closeSlashMenu();
@@ -6740,6 +7020,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     closePromptMenu();
     closeHistoryMenu();
     closeModelMenu();
+    closeReasoningMenu();
     rebuildRetryModelMenu();
     if (!retryModelMenu.childElementCount) {
       closeRetryModelMenu();
@@ -6755,6 +7036,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       e.stopPropagation();
     });
     modelMenu.addEventListener("mousedown", (e: Event) => {
+      e.stopPropagation();
+    });
+  }
+
+  if (reasoningMenu) {
+    reasoningMenu.addEventListener("pointerdown", (e: Event) => {
+      e.stopPropagation();
+    });
+    reasoningMenu.addEventListener("mousedown", (e: Event) => {
       e.stopPropagation();
     });
   }
@@ -6786,16 +7076,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
-  const bodyWithRetryMenuDismiss = body as Element & {
-    __llmRetryMenuDismissHandler?: (event: PointerEvent) => void;
-  };
-  if (bodyWithRetryMenuDismiss.__llmRetryMenuDismissHandler) {
-    panelDoc.removeEventListener(
-      "pointerdown",
-      bodyWithRetryMenuDismiss.__llmRetryMenuDismissHandler,
-      true,
-    );
-  }
   const dismissRetryMenuOnOutsidePointerDown = (e: PointerEvent) => {
     if (typeof e.button === "number" && e.button !== 0) return;
     if (!retryModelMenu || !isFloatingMenuOpen(retryModelMenu)) return;
@@ -6803,48 +7083,26 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (target && retryModelMenu.contains(target)) return;
     closeRetryModelMenu();
   };
-  panelDoc.addEventListener(
+  addDocScopedListener(
+    panelDoc,
     "pointerdown",
     dismissRetryMenuOnOutsidePointerDown,
     true,
   );
-  bodyWithRetryMenuDismiss.__llmRetryMenuDismissHandler =
-    dismissRetryMenuOnOutsidePointerDown;
 
-  const bodyWithPromptMenuDismiss = body as Element & {
-    __llmPromptMenuDismissHandler?: (event: PointerEvent) => void;
-  };
-  if (bodyWithPromptMenuDismiss.__llmPromptMenuDismissHandler) {
-    panelDoc.removeEventListener(
-      "pointerdown",
-      bodyWithPromptMenuDismiss.__llmPromptMenuDismissHandler,
-      true,
-    );
-  }
   const dismissPromptMenuOnOutsidePointerDown = (e: PointerEvent) => {
     if (!promptMenu || promptMenu.style.display === "none") return;
     const target = e.target as Node | null;
     if (target && promptMenu.contains(target)) return;
     closePromptMenu();
   };
-  panelDoc.addEventListener(
+  addDocScopedListener(
+    panelDoc,
     "pointerdown",
     dismissPromptMenuOnOutsidePointerDown,
     true,
   );
-  bodyWithPromptMenuDismiss.__llmPromptMenuDismissHandler =
-    dismissPromptMenuOnOutsidePointerDown;
 
-  const bodyWithPaperPickerDismiss = body as Element & {
-    __llmPaperPickerDismissHandler?: (event: PointerEvent) => void;
-  };
-  if (bodyWithPaperPickerDismiss.__llmPaperPickerDismissHandler) {
-    panelDoc.removeEventListener(
-      "pointerdown",
-      bodyWithPaperPickerDismiss.__llmPaperPickerDismissHandler,
-      true,
-    );
-  }
   const dismissPaperPickerOnOutsidePointerDown = (e: PointerEvent) => {
     if (!isPaperPickerOpen()) return;
     const target = e.target as Node | null;
@@ -6852,13 +7110,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (target && inputBox.contains(target)) return;
     closePaperPicker();
   };
-  panelDoc.addEventListener(
+  addDocScopedListener(
+    panelDoc,
     "pointerdown",
     dismissPaperPickerOnOutsidePointerDown,
     true,
   );
-  bodyWithPaperPickerDismiss.__llmPaperPickerDismissHandler =
-    dismissPaperPickerOnOutsidePointerDown;
 
   const getActiveMessageById = (messageId: number) => {
     if (!item || !Number.isFinite(messageId)) return null;
@@ -6963,7 +7220,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         resolvedProfile.model,
         resolvedProfile.apiBase,
         resolvedProfile.apiKey,
-        undefined,
+        getAdvancedRequestParams(),
       ).then((result) => {
         if (result !== "ok" && status) {
           setStatus(status, getPanelI18n().failedToSaveEditedPrompt, "error");
@@ -7166,6 +7423,19 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
+  if (reasoningBtn) {
+    reasoningBtn.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item || !reasoningMenu) return;
+      if (!isFloatingMenuOpen(reasoningMenu)) {
+        openReasoningMenu();
+      } else {
+        closeReasoningMenu();
+      }
+    });
+  }
+
   const doc = body.ownerDocument;
   if (
     doc &&
@@ -7210,6 +7480,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           (!modelMenuEl.contains(target) && !modelButtonEl?.contains(target))
         ) {
           setFloatingMenuOpen(modelMenuEl, MODEL_MENU_OPEN_CLASS, false);
+        }
+      }
+      const reasoningMenus = Array.from(
+        doc.querySelectorAll("#llm-reasoning-menu"),
+      ) as HTMLDivElement[];
+      for (const reasoningMenuEl of reasoningMenus) {
+        if (!isFloatingMenuOpen(reasoningMenuEl)) continue;
+        const panelRoot = reasoningMenuEl.closest("#llm-main");
+        const reasoningButtonEl = panelRoot?.querySelector(
+          "#llm-reasoning-toggle",
+        ) as HTMLButtonElement | null;
+        if (
+          !target ||
+          (!reasoningMenuEl.contains(target) &&
+            !reasoningButtonEl?.contains(target))
+        ) {
+          setFloatingMenuOpen(
+            reasoningMenuEl,
+            REASONING_MENU_OPEN_CLASS,
+            false,
+          );
         }
       }
       for (const retryModelMenuEl of retryModelMenus) {
@@ -7789,10 +8080,8 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
 
   // Listen for model config changes from the Setting tab
   // so the Discussion tab model menu refreshes immediately.
-  if (panelDoc) {
-    panelDoc.addEventListener("llm-models-changed", (event: Event) => {
-      updateLiveSettingsReadinessState(event);
-      updateModelButton();
-    });
-  }
+  addDocScopedListener(panelDoc, "llm-models-changed", (event: Event) => {
+    updateLiveSettingsReadinessState(event);
+    updateModelButton();
+  });
 }

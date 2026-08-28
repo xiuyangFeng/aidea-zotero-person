@@ -22,11 +22,10 @@
   <strong>🌐 Website:</strong> <a href="https://visterainer.github.io/aidea-zotero/ja/">https://visterainer.github.io/aidea-zotero/ja/</a>
 </p>
 
-AIdea は、Zotero 向けの無料かつオープンソースの AI 研究支援プラグインです。🔐 OpenAI（ChatGPT）、Google Gemini、GitHub Copilot での OAuth ログインに対応しています。⚙️ さらに、OpenAI 互換 API や、Ollama、LM Studio、vLLM などを通じたローカル／セルフホストモデルにも対応しています。複数プロバイダ対応の対話、文書コンテキスト解析、ノート書き戻し、記憶機能、全文翻訳を、Zotero のライブラリ画面、PDF リーダー、EPUB リーダーに統合します。
+AIdea は、Zotero 向けの無料かつオープンソースの AI 研究支援プラグインです。🔐 OpenAI（ChatGPT）と GitHub Copilot での OAuth ログインに対応しています。⚙️ さらに、OpenAI 互換 API や、Ollama、LM Studio、vLLM などを通じたローカル／セルフホストモデルにも対応しています。複数プロバイダ対応の対話、文書コンテキスト解析、ノート書き戻し、記憶機能、全文翻訳を、Zotero のライブラリ画面、PDF リーダー、EPUB リーダーに統合します。
 
 <p align="center">
   <img alt="OpenAI ChatGPT" src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" />
-  <img alt="Google Gemini" src="https://img.shields.io/badge/Google-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img alt="GitHub Copilot" src="https://img.shields.io/badge/GitHub-Copilot-111111?style=for-the-badge&logo=github&logoColor=white" />
 </p>
 
@@ -87,9 +86,10 @@ AIdea は、論文や電子書籍の読解、追質問、抜粋、ノート整�
 | 方式                      | 認証                                 | 補足                                                     |
 | ------------------------- | ------------------------------------ | -------------------------------------------------------- |
 | OpenAI（ChatGPT）         | Codex CLI 経由の OAuth               | 必要な場合はプラグインが Node.js 実行環境を自動導入      |
-| Google Gemini             | プラグイン内 OAuth（PKCE）           | 必要な場合はプラグインが Node.js 実行環境を自動導入      |
 | GitHub Copilot            | プラグイン内 OAuth（Device Code）    | Node.js の追加導入は不要                                 |
 | OpenAI 互換エンドポイント | API Base URL、モデル、任意の API Key | ローカル、自前運用、またはサードパーティ互換サービス向け |
+
+> **注：** Google が 2026 年 6 月 18 日に個人アカウント（Google AI Pro/Ultra を含む）向けの Code Assist OAuth アクセスを終了したため、Gemini CLI OAuth 対応は削除されました。Gemini モデルは、Gemini API キーを使って任意の OpenAI 互換カスタムエンドポイント経由で、または GitHub Copilot のモデルカタログ経由で引き続き利用できます。
 
 ## インストール
 

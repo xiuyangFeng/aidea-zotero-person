@@ -8,6 +8,7 @@ import {
   getAnthropicReasoningProfileForModel,
   getQwenReasoningProfileForModel,
   shouldUseDeepseekThinkingPayload,
+  inferReasoningProviderFromModel,
 } from "../src/utils/reasoningProfiles";
 
 describe("reasoningProfiles", function () {
@@ -141,6 +142,72 @@ describe("reasoningProfiles", function () {
 
     it("should handle case insensitivity", function () {
       assert.isTrue(supportsReasoningForModel("openai", "GPT-5"));
+    });
+  });
+
+  describe("Gemini 3.x pro thinking levels", function () {
+    it("gemini-3.1-pro-preview should use three thinking levels", function () {
+      const profile = getGeminiReasoningProfileForModel(
+        "gemini-3.1-pro-preview",
+      );
+      assert.equal(profile.param, "thinking_level");
+      const levels = profile.options.map((o) => o.level);
+      assert.sameMembers(levels, ["low", "medium", "high"]);
+      assert.equal(profile.defaultLevel, "high");
+    });
+
+    it("gemini-3-pro should keep the two-level profile", function () {
+      const profile = getGeminiReasoningProfileForModel("gemini-3-pro");
+      const levels = profile.options.map((o) => o.level);
+      assert.sameMembers(levels, ["low", "high"]);
+      assert.equal(profile.defaultLevel, "high");
+    });
+
+    it("gemini-3-flash-preview should fall through to the generic profile", function () {
+      const profile = getGeminiReasoningProfileForModel(
+        "gemini-3-flash-preview",
+      );
+      assert.equal(profile.param, "thinking_level");
+      assert.equal(profile.defaultLevel, "medium");
+    });
+  });
+
+  describe("inferReasoningProviderFromModel", function () {
+    it("maps model families to reasoning providers", function () {
+      assert.equal(inferReasoningProviderFromModel("gpt-5.3-codex"), "openai");
+      assert.equal(inferReasoningProviderFromModel("o3-mini"), "openai");
+      assert.equal(
+        inferReasoningProviderFromModel("gemini-3.1-pro-preview"),
+        "gemini",
+      );
+      assert.equal(
+        inferReasoningProviderFromModel("claude-opus-4.6"),
+        "anthropic",
+      );
+      assert.equal(
+        inferReasoningProviderFromModel("deepseek-reasoner"),
+        "deepseek",
+      );
+      assert.equal(inferReasoningProviderFromModel("qwen3-max"), "qwen");
+      assert.equal(inferReasoningProviderFromModel("grok-4"), "grok");
+      assert.equal(inferReasoningProviderFromModel("kimi-k2.5"), "kimi");
+    });
+
+    it("strips vendor prefixes before matching", function () {
+      assert.equal(
+        inferReasoningProviderFromModel("openrouter/google/gemini-2.5-pro"),
+        "gemini",
+      );
+      assert.equal(
+        inferReasoningProviderFromModel("provider:claude-sonnet-4.6"),
+        "anthropic",
+      );
+    });
+
+    it("returns null for unknown model families", function () {
+      assert.isNull(inferReasoningProviderFromModel("llama3.1:8b"));
+      assert.isNull(inferReasoningProviderFromModel(""));
+      assert.isNull(inferReasoningProviderFromModel(undefined));
     });
   });
 });

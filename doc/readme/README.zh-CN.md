@@ -24,13 +24,12 @@
 
 <p align="center">
   <strong>免费开源的 Zotero AI 助手插件</strong><br/>
-  🔐 支持 OpenAI（ChatGPT）、Google Gemini、GitHub Copilot 的 OAuth 授权登录<br/>
+  🔐 支持 OpenAI（ChatGPT）和 GitHub Copilot 的 OAuth 授权登录<br/>
   ⚙️ 支持 OpenAI 兼容 API，以及通过 Ollama、LM Studio、vLLM 等接入本地或自托管模型
 </p>
 
 <p align="center">
   <img alt="OpenAI ChatGPT" src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" />
-  <img alt="Google Gemini" src="https://img.shields.io/badge/Google-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img alt="GitHub Copilot" src="https://img.shields.io/badge/GitHub-Copilot-111111?style=for-the-badge&logo=github&logoColor=white" />
 </p>
 
@@ -118,8 +117,9 @@ PDF 首次使用划词翻译时，AIdea 会在本地生成包含精简概述和�
 | 服务商                | 认证方式                    | 额外安装                |
 | --------------------- | --------------------------- | ----------------------- |
 | **OpenAI（ChatGPT）** | Codex CLI OAuth             | Node.js（插件自动安装） |
-| **Google Gemini**     | 插件内 OAuth（PKCE）        | Node.js（插件自动安装） |
 | **GitHub Copilot**    | 插件内 OAuth（Device Code） | 无需额外安装            |
+
+> **注意：** 由于 Google 已于 2026 年 6 月 18 日关停个人账号（含 Google AI Pro/Ultra）的 Code Assist OAuth 通道，Gemini CLI OAuth 支持已被移除。Gemini 模型仍可通过 Gemini API Key 配合任意 OpenAI 兼容自定义端点使用，或通过 GitHub Copilot 的模型目录使用。
 
 ### 📝 笔记导出
 
@@ -158,7 +158,7 @@ AIdea 会在多轮对话中捕捉和回忆有价值的信息，以便后续回�
 ### 环境要求
 
 - **Zotero 7 及以上**
-- **Node.js**，OpenAI 和 Gemini 需要时可由插件自动安装
+- **Node.js**，OpenAI（Codex CLI）需要时可由插件自动安装
 
 ### 安装插件
 
@@ -190,12 +190,12 @@ AIdea 提供两种连接方式，可以只用其中一种，也可以同时使�
 
 > **① `安装/更新环境`** → **② `OAuth 登录`** → **③ `刷新模型`**
 
-| 按钮                | 功能说明                                                                                                               |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **`安装/更新环境`** | 安装并配置所需 CLI 工具及运行环境，包括 Node.js 和 npm。GitHub Copilot 无需此步骤。                                    |
-| **`OAuth 登录`**    | 启动服务商对应的授权流程。OpenAI 和 Gemini 会直接打开浏览器。GitHub Copilot 会显示 device code，并打开浏览器完成授权。 |
-| **`刷新模型`**      | 登录成功后加载当前服务商可用的模型列表。                                                                               |
-| **`删除授权`**      | 清除本地保存的 OAuth 令牌。                                                                                            |
+| 按钮                | 功能说明                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **`安装/更新环境`** | 安装并配置所需 CLI 工具及运行环境，包括 Node.js 和 npm。GitHub Copilot 无需此步骤。                          |
+| **`OAuth 登录`**    | 启动服务商对应的授权流程。OpenAI 会直接打开浏览器。GitHub Copilot 会显示 device code，并打开浏览器完成授权。 |
+| **`刷新模型`**      | 登录成功后加载当前服务商可用的模型列表。                                                                     |
+| **`删除授权`**      | 清除本地保存的 OAuth 令牌。                                                                                  |
 
 <p align="center">
   <img src="../screenshots/settings_oauth_models_cn.png" alt="OAuth 提供商与模型管理" width="700" />
@@ -270,7 +270,8 @@ AIdea 也支持连接任意 **OpenAI 兼容聊天端点**，适合本地、自�
 ## 🎨 个性化优化与增强
 
 本分支包含以下针对实际使用场景的深度优化与美化：
-- **CLI 与 OAuth 环境智能识别**：全面增强对 macOS 环境下 Homebrew（`/opt/homebrew/bin`）以及 NVM 管理的多版本 Node/npm 全局模块路径（`~/.nvm/versions/node/*/lib/node_modules` 与 `bin`）的自动扫描，彻底解决从 Zotero GUI 启动时由于 PATH 缺失导致 Codex / Gemini CLI 提示未找到的问题。
+
+- **CLI 与 OAuth 环境智能识别**：全面增强对 macOS 环境下 Homebrew（`/opt/homebrew/bin`）以及 NVM 管理的多版本 Node/npm 全局模块路径（`~/.nvm/versions/node/*/lib/node_modules` 与 `bin`）的自动扫描，彻底解决从 Zotero GUI 启动时由于 PATH 缺失导致 Codex CLI 提示未找到的问题。
 - **现代化对话界面美化**：
   - 重构“尚未准备好”状态卡片，采用现代磨砂拟态风格，彻底修复设置按钮文字断行折叠问题。
   - 美化快捷操作标签（摘要/翻译/要点等），升级为精致药丸胶囊按钮，增加柔和阴影与悬停微动效。

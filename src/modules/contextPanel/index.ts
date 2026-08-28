@@ -811,6 +811,13 @@ export function registerReaderSelectionTracking() {
 
     if (selectedText || showAddTextInPopup) {
       let popupSentinelEl: HTMLElement | null = null;
+      // Typography refresh listeners registered for a popup are disposed
+      // either lazily (event fires after the popup is gone) or eagerly via
+      // the sentinel watch below. Keyed by the per-render reader event.
+      const selectionTypographyCleanupByEvent = new WeakMap<
+        object,
+        () => void
+      >();
       const addTextToPanel = async () => {
         const effectiveSelectedText =
           normalizeSelectedText(selectedText) ||
@@ -1700,12 +1707,7 @@ export function registerReaderSelectionTracking() {
 
           const refreshSelectionTypography = () => {
             if (!wrap.isConnected) {
-              for (const target of selectionTypographyRefreshTargets) {
-                target.removeEventListener(
-                  PANEL_TYPOGRAPHY_REFRESH_EVENT,
-                  refreshSelectionTypography,
-                );
-              }
+              removeSelectionTypographyListeners();
               return;
             }
             const nextTypography = getPanelTypographySettings();
@@ -1723,6 +1725,15 @@ export function registerReaderSelectionTracking() {
             selectionTranslateContentChanged?.();
           };
           const selectionTypographyRefreshTargets: Window[] = [];
+          const removeSelectionTypographyListeners = () => {
+            for (const target of selectionTypographyRefreshTargets.splice(0)) {
+              target.removeEventListener(
+                PANEL_TYPOGRAPHY_REFRESH_EVENT,
+                refreshSelectionTypography,
+              );
+            }
+            selectionTypographyCleanupByEvent.delete(event);
+          };
           const addSelectionTypographyRefreshTarget = (
             target: Window | null | undefined,
           ) => {
@@ -1750,6 +1761,10 @@ export function registerReaderSelectionTracking() {
           } catch {
             /* ignore */
           }
+          selectionTypographyCleanupByEvent.set(
+            event,
+            removeSelectionTypographyListeners,
+          );
           selectionTranslateContentChanged();
 
           let latestSelectionTranslation: {
@@ -1991,11 +2006,18 @@ export function registerReaderSelectionTracking() {
               setTimeout(watchSentinel, 200);
               return;
             }
-            if (wasConnected) {
-              for (const key of keys) {
-                if (recentReaderSelectionCache.get(key) === selectedText) {
-                  recentReaderSelectionCache.delete(key);
-                }
+            if (!wasConnected) {
+              // Popup never made it into the DOM — dispose its typography
+              // refresh listeners instead of waiting for a refresh event.
+              selectionTypographyCleanupByEvent.get(event)?.();
+              return;
+            }
+            // Popup is gone — dispose its typography refresh listeners and
+            // drop the recent-selection cache entries for it.
+            selectionTypographyCleanupByEvent.get(event)?.();
+            for (const key of keys) {
+              if (recentReaderSelectionCache.get(key) === selectedText) {
+                recentReaderSelectionCache.delete(key);
               }
             }
           };

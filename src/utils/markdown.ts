@@ -25,7 +25,7 @@ import katex from "katex";
 // Types
 // =============================================================================
 
-interface TextBlock {
+export interface TextBlock {
   type:
     | "codeblock"
     | "mathblock"
@@ -81,7 +81,7 @@ const HTML_ESCAPE_MAP: Record<string, string> = {
 // =============================================================================
 
 /** Escape HTML special characters */
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (m) => HTML_ESCAPE_MAP[m]);
 }
 
@@ -294,7 +294,7 @@ function hasBalancedInlineDelimiter(text: string, delimiter: string): boolean {
 // =============================================================================
 
 /** Split text into independent blocks for isolated rendering */
-function splitIntoBlocks(text: string): TextBlock[] {
+export function splitIntoBlocks(text: string): TextBlock[] {
   const blocks: TextBlock[] = [];
   const remaining = text;
 
@@ -541,7 +541,7 @@ function splitTextBlocks(text: string): TextBlock[] {
 // =============================================================================
 
 /** Render a single block to HTML */
-function renderBlock(block: TextBlock): string {
+export function renderBlock(block: TextBlock): string {
   switch (block.type) {
     case "codeblock":
       return renderCodeBlock(block.content, block.raw);

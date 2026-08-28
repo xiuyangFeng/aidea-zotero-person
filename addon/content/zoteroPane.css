@@ -1911,6 +1911,24 @@
   --llm-z-model-menu: 180;
   --llm-z-context-menu: 190;
   --llm-z-modal: 200;
+
+  /*
+   * Shape and elevation scale. New rules should pick a step from these
+   * instead of inventing another radius or shadow, so surfaces stay
+   * visually related as the panel grows.
+   */
+  --llm-radius-xs: 4px;
+  --llm-radius-sm: 6px;
+  --llm-radius-md: 10px;
+  --llm-radius-lg: 14px;
+  --llm-radius-xl: 18px;
+  --llm-radius-pill: 999px;
+  --llm-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --llm-elevation-2:
+    0 2px 10px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02);
+  --llm-elevation-3: 0 8px 24px -4px rgba(0, 0, 0, 0.08);
+  --llm-elevation-4:
+    0 4px 6px rgba(0, 0, 0, 0.06), 0 12px 28px rgba(0, 0, 0, 0.16);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -2286,7 +2304,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--stroke-secondary));
+  border: 1px solid
+    color-mix(in srgb, var(--color-accent) 22%, var(--stroke-secondary));
   border-radius: 14px;
   background: linear-gradient(
     135deg,
@@ -2298,7 +2317,9 @@
     0 10px 25px -5px rgba(0, 0, 0, 0.07),
     0 4px 10px -2px rgba(0, 0, 0, 0.04);
   backdrop-filter: blur(8px);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .llm-chat-readiness[hidden] {
@@ -2369,7 +2390,8 @@
 .llm-chat-readiness-action:hover {
   filter: brightness(1.06);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  box-shadow: 0 4px 12px
+    color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
 .llm-chat-readiness-action:active {
@@ -2448,7 +2470,11 @@
   justify-content: center;
   position: relative;
   min-width: 0;
-  background: color-mix(in srgb, var(--fill-quinary) 70%, var(--material-background));
+  background: color-mix(
+    in srgb,
+    var(--fill-quinary) 70%,
+    var(--material-background)
+  );
   border: 1px solid color-mix(in srgb, var(--stroke-secondary) 85%, transparent);
   color: var(--fill-primary);
   font-size: var(--llm-fs-11, 11px);
@@ -2472,7 +2498,11 @@
 }
 
 .llm-shortcut-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-accent) 10%, var(--material-background));
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 10%,
+    var(--material-background)
+  );
   border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
   color: var(--color-accent);
   transform: translateY(-1.5px);
@@ -4627,7 +4657,9 @@
   border-radius: 18px;
   border: 1px solid var(--stroke-secondary);
   background: var(--material-background);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.03),
+    0 1px 3px rgba(0, 0, 0, 0.02);
   overflow: visible;
   transition:
     border-color 0.2s ease,
@@ -5735,7 +5767,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 .llm-send-btn:hover:not(:disabled) {
   transform: scale(1.05);
   filter: brightness(1.06);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  box-shadow: 0 4px 14px
+    color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 .llm-send-btn:active:not(:disabled) {
@@ -6950,6 +6983,66 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   outline-offset: 1px;
 }
 
+/* ── Inline file chip sizing ───────────────────────────────────────────
+   File chips are direct children of the previews row, so they miss the width
+   ceiling paper chips inherit from #llm-paper-context-list. Without it a long
+   filename stretches the chip to the full row, pushes the remove button out of
+   view, and grows the previews area until it squeezes the textarea and the
+   action bar out of the composer. */
+.llm-context-previews > .llm-file-chip-inline {
+  max-width: min(100%, clamp(180px, 42cqw, 420px));
+}
+
+.llm-context-previews > .llm-file-chip-inline .llm-selected-context-header {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The label yields space; the remove button never shrinks away. */
+.llm-context-previews > .llm-file-chip-inline .llm-paper-context-chip-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.llm-context-previews > .llm-file-chip-inline .llm-remove-img-btn {
+  flex: 0 0 auto;
+}
+
+/* Give attachment chips the same pill surface as the rest of the composer so
+   a pinned file reads as context, not as a warning. */
+.llm-context-previews > .llm-file-chip-inline {
+  border-radius: var(--llm-radius-pill);
+  background: color-mix(
+    in srgb,
+    var(--llm-file-chip-accent, var(--color-accent)) 8%,
+    var(--llm-theme-composer-bg, var(--material-background))
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--llm-file-chip-accent, var(--color-accent)) 22%,
+      transparent
+    );
+  padding: 1px 4px 1px 2px;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.llm-context-previews > .llm-file-chip-inline:hover {
+  background: color-mix(
+    in srgb,
+    var(--llm-file-chip-accent, var(--color-accent)) 14%,
+    var(--llm-theme-composer-bg, var(--material-background))
+  );
+}
+
+/* The filename stays body-coloured; only the type icon carries the accent. */
+.llm-file-chip-inline .llm-paper-context-chip-label {
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+}
+
 /* ── Inline file chip icon system ──────────────────────────────────── */
 .llm-file-chip-inline .llm-paper-context-chip-label::before {
   content: "";
@@ -6959,7 +7052,7 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   min-width: 13px;
   margin-right: 5px;
   vertical-align: -2px;
-  background-color: currentColor;
+  background-color: var(--llm-file-chip-accent, currentColor);
   mask-repeat: no-repeat;
   mask-position: center;
   mask-size: contain;
@@ -6975,8 +7068,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   mask-image: url("icons/file-type-pdf.svg");
   -webkit-mask-image: url("icons/file-type-pdf.svg");
 }
-.llm-file-chip-inline[data-category="pdf"] .llm-paper-context-chip-label {
-  color: #dc2626;
+.llm-file-chip-inline[data-category="pdf"] {
+  --llm-file-chip-accent: #dc2626;
 }
 
 .llm-file-chip-inline.llm-paper-context-summary[data-category="pdf"]
@@ -7026,8 +7119,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   mask-image: url("icons/file-type-markdown.svg");
   -webkit-mask-image: url("icons/file-type-markdown.svg");
 }
-.llm-file-chip-inline[data-category="markdown"] .llm-paper-context-chip-label {
-  color: #2563eb;
+.llm-file-chip-inline[data-category="markdown"] {
+  --llm-file-chip-accent: #2563eb;
 }
 
 .llm-file-chip-inline[data-category="code"]
@@ -7035,8 +7128,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   mask-image: url("icons/file-type-code.svg");
   -webkit-mask-image: url("icons/file-type-code.svg");
 }
-.llm-file-chip-inline[data-category="code"] .llm-paper-context-chip-label {
-  color: #059669;
+.llm-file-chip-inline[data-category="code"] {
+  --llm-file-chip-accent: #059669;
 }
 
 .llm-file-chip-inline[data-category="text"]
@@ -7044,8 +7137,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   mask-image: url("icons/file-type-text.svg");
   -webkit-mask-image: url("icons/file-type-text.svg");
 }
-.llm-file-chip-inline[data-category="text"] .llm-paper-context-chip-label {
-  color: #6b7280;
+.llm-file-chip-inline[data-category="text"] {
+  --llm-file-chip-accent: #6b7280;
 }
 
 .llm-file-chip-inline[data-category="image"]
@@ -7053,8 +7146,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   mask-image: url("icons/file-type-image.svg");
   -webkit-mask-image: url("icons/file-type-image.svg");
 }
-.llm-file-chip-inline[data-category="image"] .llm-paper-context-chip-label {
-  color: #c026d3;
+.llm-file-chip-inline[data-category="image"] {
+  --llm-file-chip-accent: #c026d3;
 }
 
 .llm-file-chip-inline[data-category="file"]
@@ -7062,8 +7155,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   mask-image: url("icons/file-type-generic.svg");
   -webkit-mask-image: url("icons/file-type-generic.svg");
 }
-.llm-file-chip-inline[data-category="file"] .llm-paper-context-chip-label {
-  color: #7c3aed;
+.llm-file-chip-inline[data-category="file"] {
+  --llm-file-chip-accent: #7c3aed;
 }
 
 /* Inline file chip processing pulse */
@@ -8262,7 +8355,12 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 .llm-panel[data-composer-theme-surface="true"] .llm-input-section:focus-within {
   border-color: var(--llm-theme-accent, var(--color-accent));
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--llm-theme-accent, var(--color-accent)) 16%, transparent),
+    0 0 0 3px
+      color-mix(
+        in srgb,
+        var(--llm-theme-accent, var(--color-accent)) 16%,
+        transparent
+      ),
     0 8px 24px -4px rgba(0, 0, 0, 0.08);
 }
 

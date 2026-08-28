@@ -1,4 +1,4 @@
-import { renderMarkdown, renderMarkdownForNote } from "../../utils/markdown";
+import { renderMarkdownForNote } from "../../utils/markdown";
 import { getZoteroItem } from "../../utils/zoteroItems";
 import {
   findAssistantBubbleByMessageId,
@@ -6,6 +6,7 @@ import {
   finalizeStreamingBubble,
   createQueuedStreamingPatch,
   createStreamingAutoScroller,
+  renderAssistantMarkdownCached,
 } from "./streamingUpdate";
 import {
   appendMessageNode,
@@ -33,6 +34,7 @@ import {
   GLOBAL_CONVERSATION_KEY_BASE,
   ACTIVE_PAPER_MULTI_CONTEXT_MAX_CHUNKS,
   ACTIVE_PAPER_MULTI_CONTEXT_MAX_LENGTH,
+  SUPPLEMENTAL_PAPER_CONTEXT_TOTAL_MAX_LENGTH,
   CONTEXT_COMPACTION_THRESHOLD,
   RECENT_TURNS_PROTECTED,
 } from "./constants";
@@ -113,10 +115,7 @@ import {
   isDocumentContextQueryDependent,
   resolveReaderDocument,
 } from "./documentContext";
-import {
-  buildSupplementalPaperContext,
-  buildSinglePaperContext,
-} from "./paperContext";
+import { buildSinglePaperContext } from "./paperContext";
 import { formatPaperCitationLabel } from "./paperAttribution";
 import { resolveContextSourceItem } from "./contextResolution";
 import { buildChatHistoryNotePayload } from "./notes";
@@ -1402,11 +1401,49 @@ async function buildCombinedContextForRequest(params: {
   }
 
   // ── Combine all Zone A segments ──
-  const supplementalBlocks = [...pool.supplementalContexts.values()]
-    .map((entry) => entry.builtContext)
-    .filter(Boolean);
+  // Per-paper caps alone allow 20 × 60k chars, so the shared total budget
+  // must be enforced here at assembly time (earliest-added papers win).
+  const supplementalBlocks: string[] = [];
+  let remainingSupplementalBudget = SUPPLEMENTAL_PAPER_CONTEXT_TOTAL_MAX_LENGTH;
+  let droppedSupplementalCount = 0;
+  for (const entry of pool.supplementalContexts.values()) {
+    const block = entry.builtContext;
+    if (!block) continue;
+    if (remainingSupplementalBudget <= 0) {
+      droppedSupplementalCount += 1;
+      continue;
+    }
+    if (block.length > remainingSupplementalBudget) {
+      supplementalBlocks.push(block.slice(0, remainingSupplementalBudget));
+      remainingSupplementalBudget = 0;
+      continue;
+    }
+    supplementalBlocks.push(block);
+    remainingSupplementalBudget -= block.length;
+  }
+  if (droppedSupplementalCount > 0) {
+    ztoolkit.log(
+      `LLM context: supplemental papers exceeded the ${SUPPLEMENTAL_PAPER_CONTEXT_TOTAL_MAX_LENGTH}-char total budget; ` +
+        `${droppedSupplementalCount} paper(s) truncated or dropped`,
+    );
+  }
+  // With several papers in one request the model must keep them apart, so the
+  // attribution rules travel with the data instead of the system prompt, which
+  // the user may have replaced with their own.
+  const paperCountInRequest =
+    supplementalBlocks.length + (pdfContext.trim() ? 1 : 0);
+  const supplementalHeading =
+    paperCountInRequest > 1
+      ? `Supplemental Paper Contexts (${supplementalBlocks.length} paper(s) below):\n` +
+        "[INSTRUCTION: Several papers are provided. Each block starts with its own " +
+        '"Supplemental Paper N" label and metadata.\n' +
+        "- Attribute every claim, number, and quotation to the paper it came from, by title or by its Supplemental Paper N label.\n" +
+        "- Never merge findings from different papers into one unattributed statement.\n" +
+        "- When papers disagree, say so explicitly and name each side.\n" +
+        "- If a paper's block lacks the information asked about, say so for that paper instead of borrowing another paper's answer.]"
+      : "Supplemental Paper Contexts:";
   const supplementalPaperContext = supplementalBlocks.length
-    ? `Supplemental Paper Contexts:\n\n${supplementalBlocks.join("\n\n---\n\n")}`
+    ? `${supplementalHeading}\n\n${supplementalBlocks.join("\n\n---\n\n")}`
     : "";
 
   throwIfRequestAborted(params.signal);
@@ -2387,6 +2424,7 @@ export async function editUserMessageAndRetry(
         apiKey: effectiveRequestConfig.apiKey,
         temperature: effectiveRequestConfig.advanced?.temperature,
         maxTokens: effectiveRequestConfig.advanced?.maxTokens,
+        reasoning: effectiveRequestConfig.advanced?.reasoning,
       },
       (delta) => {
         streamedAnswer += sanitizeText(delta);
@@ -2399,15 +2437,17 @@ export async function editUserMessageAndRetry(
       isPanelRequestCancelled(body, thisRequestId) ||
       Boolean(panelAbortController?.signal.aborted)
     ) {
+      assistantMessage.text = streamedAnswer || assistantMessage.text;
+      if (!assistantMessage.text)
+        assistantMessage.text = `*(${i18n.cancelled})*`;
       finalizeStreamingBubble(
         findAssistantBubbleByMessageId(
           ui.chatBox as HTMLDivElement | null,
           assistantMessage.messageId,
         ),
+        assistantMessage.text,
+        assistantRenderCacheKey(assistantMessage),
       );
-      assistantMessage.text = streamedAnswer || assistantMessage.text;
-      if (!assistantMessage.text)
-        assistantMessage.text = `*(${i18n.cancelled})*`;
       assistantMessage.timestamp = Date.now();
       assistantMessage.modelName = effectiveRequestConfig.model;
       assistantMessage.streaming = false;
@@ -2422,13 +2462,15 @@ export async function editUserMessageAndRetry(
       return "ok";
     }
 
+    assistantMessage.text = sanitizeText(answer) || streamedAnswer;
     finalizeStreamingBubble(
       findAssistantBubbleByMessageId(
         ui.chatBox as HTMLDivElement | null,
         assistantMessage.messageId,
       ),
+      assistantMessage.text,
+      assistantRenderCacheKey(assistantMessage),
     );
-    assistantMessage.text = sanitizeText(answer) || streamedAnswer;
     assistantMessage.timestamp = Date.now();
     assistantMessage.modelName = effectiveRequestConfig.model;
     assistantMessage.streaming = false;
@@ -2749,6 +2791,7 @@ export async function retryLatestAssistantResponse(
         apiKey: effectiveRequestConfig.apiKey,
         temperature: effectiveRequestConfig.advanced?.temperature,
         maxTokens: effectiveRequestConfig.advanced?.maxTokens,
+        reasoning: effectiveRequestConfig.advanced?.reasoning,
       },
       (delta) => {
         streamedAnswer += sanitizeText(delta);
@@ -2762,13 +2805,15 @@ export async function retryLatestAssistantResponse(
       Boolean(panelAbortController?.signal.aborted)
     ) {
       // Keep whatever the LLM has already generated
+      assistantMessage.text = streamedAnswer || assistantMessage.text;
       finalizeStreamingBubble(
         findAssistantBubbleByMessageId(
           ui.chatBox as HTMLDivElement | null,
           assistantMessage.messageId,
         ),
+        assistantMessage.text,
+        assistantRenderCacheKey(assistantMessage),
       );
-      assistantMessage.text = streamedAnswer || assistantMessage.text;
       assistantMessage.timestamp = Date.now();
       assistantMessage.modelName = effectiveRequestConfig.model;
       assistantMessage.streaming = false;
@@ -2783,13 +2828,15 @@ export async function retryLatestAssistantResponse(
       return;
     }
 
+    assistantMessage.text = sanitizeText(answer) || streamedAnswer;
     finalizeStreamingBubble(
       findAssistantBubbleByMessageId(
         ui.chatBox as HTMLDivElement | null,
         assistantMessage.messageId,
       ),
+      assistantMessage.text,
+      assistantRenderCacheKey(assistantMessage),
     );
-    assistantMessage.text = sanitizeText(answer) || streamedAnswer;
     assistantMessage.timestamp = Date.now();
     assistantMessage.modelName = effectiveRequestConfig.model;
     assistantMessage.streaming = false;
@@ -3151,6 +3198,7 @@ export async function sendQuestion(
         apiKey: effectiveRequestConfig.apiKey,
         temperature: effectiveRequestConfig.advanced?.temperature,
         maxTokens: effectiveRequestConfig.advanced?.maxTokens,
+        reasoning: effectiveRequestConfig.advanced?.reasoning,
       },
       (delta) => {
         assistantMessage.text += sanitizeText(delta);
@@ -3166,13 +3214,15 @@ export async function sendQuestion(
       return;
     }
 
+    assistantMessage.text = sanitizeText(answer) || assistantMessage.text;
     finalizeStreamingBubble(
       findAssistantBubbleByMessageId(
         ui.chatBox as HTMLDivElement | null,
         assistantMessage.messageId,
       ),
+      assistantMessage.text,
+      assistantRenderCacheKey(assistantMessage),
     );
-    assistantMessage.text = sanitizeText(answer) || assistantMessage.text;
     assistantMessage.streaming = false;
     refreshChatSafely();
     await persistAssistantUpdate();
@@ -3214,6 +3264,16 @@ export async function sendQuestion(
   } finally {
     finishPanelRequestUI(body, ui, conversationKey, thisRequestId);
   }
+}
+
+/**
+ * Stable cache key for a persisted assistant message's rendered markdown.
+ * Returns `null` for messages without a database id (cache bypassed).
+ */
+function assistantRenderCacheKey(
+  msg: { messageId?: number } | null | undefined,
+): string | null {
+  return Number.isFinite(msg?.messageId) ? `aidea:md:${msg!.messageId}` : null;
 }
 
 export function refreshChat(body: Element, item?: Zotero.Item | null) {
@@ -3973,7 +4033,13 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         const safeText = sanitizeText(msg.text);
         const renderAssistantMarkdown = (target: HTMLDivElement) => {
           try {
-            target.innerHTML = renderMarkdown(safeText);
+            // Rendered markdown is cached per message id, so rebuilding the
+            // whole chat after each response skips the expensive markdown +
+            // KaTeX pass for every message whose text did not change.
+            target.innerHTML = renderAssistantMarkdownCached(
+              assistantRenderCacheKey(msg),
+              safeText,
+            );
           } catch (err) {
             ztoolkit.log("LLM render error:", err);
             target.textContent = safeText;

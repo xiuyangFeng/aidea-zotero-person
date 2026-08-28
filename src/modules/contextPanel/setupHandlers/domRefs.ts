@@ -6,6 +6,9 @@ export type PanelDomRefs = {
   modelBtn: HTMLButtonElement | null;
   modelSlot: HTMLDivElement | null;
   modelMenu: HTMLDivElement | null;
+  reasoningBtn: HTMLButtonElement | null;
+  reasoningSlot: HTMLDivElement | null;
+  reasoningMenu: HTMLDivElement | null;
   actionsRow: HTMLDivElement | null;
   actionsLeft: HTMLDivElement | null;
   actionsRight: HTMLDivElement | null;
@@ -28,6 +31,7 @@ export type PanelDomRefs = {
   slashMenu: HTMLDivElement | null;
   slashUploadOption: HTMLButtonElement | null;
   slashReferenceOption: HTMLButtonElement | null;
+  slashLibraryOption: HTMLButtonElement | null;
   imagePreview: HTMLDivElement | null;
   selectedContextList: HTMLDivElement | null;
   previewStrip: HTMLDivElement | null;
@@ -90,6 +94,15 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
       "#llm-model-dropdown",
     ) as HTMLDivElement | null,
     modelMenu: body.querySelector("#llm-model-menu") as HTMLDivElement | null,
+    reasoningBtn: body.querySelector(
+      "#llm-reasoning-toggle",
+    ) as HTMLButtonElement | null,
+    reasoningSlot: body.querySelector(
+      "#llm-reasoning-dropdown",
+    ) as HTMLDivElement | null,
+    reasoningMenu: body.querySelector(
+      "#llm-reasoning-menu",
+    ) as HTMLDivElement | null,
     actionsRow: body.querySelector(".llm-actions") as HTMLDivElement | null,
     actionsLeft: body.querySelector(
       ".llm-actions-left",
@@ -143,6 +156,9 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     ) as HTMLButtonElement | null,
     slashReferenceOption: body.querySelector(
       "#llm-slash-reference-option",
+    ) as HTMLButtonElement | null,
+    slashLibraryOption: body.querySelector(
+      "#llm-slash-library-option",
     ) as HTMLButtonElement | null,
     imagePreview: body.querySelector(
       "#llm-image-preview",

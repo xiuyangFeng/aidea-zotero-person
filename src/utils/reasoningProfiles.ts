@@ -188,6 +188,27 @@ const GEMINI_3_PRO_PROFILE: ProviderProfile = {
   },
 };
 
+// Gemini 3.1+ Pro adds a medium thinking level on top of Gemini 3 Pro's
+// low/high pair.
+const GEMINI_31_PRO_PROFILE: ProviderProfile = {
+  supportsReasoning: true,
+  defaultLevel: "high",
+  options: [
+    option("high", "high"),
+    option("medium", "medium"),
+    option("low", "low"),
+  ],
+  gemini: {
+    param: "thinking_level",
+    defaultValue: "high",
+    levelToValue: {
+      high: "high",
+      medium: "medium",
+      low: "low",
+    },
+  },
+};
+
 const GEMINI_25_PRO_PROFILE: ProviderProfile = {
   supportsReasoning: true,
   defaultLevel: "default",
@@ -387,6 +408,11 @@ const PROFILE_RULES: Record<
         profile: GEMINI_25_FLASH_PROFILE,
       },
       {
+        // gemini-3.1-pro-preview, gemini-3.5-pro, ... (dotted 3.x generations)
+        match: /(^|[/:])gemini-3\.\d+-pro(?:\b|[.-])/,
+        profile: GEMINI_31_PRO_PROFILE,
+      },
+      {
         match: /(^|[/:])gemini-3-pro(?:\b|[.-])/,
         profile: GEMINI_3_PRO_PROFILE,
       },
@@ -475,6 +501,29 @@ const OPENAI_EFFORT_ORDER: OpenAIReasoningEffort[] = [
 
 function normalizeModelName(modelName?: string): string {
   return (modelName || "").trim().toLowerCase();
+}
+
+/**
+ * Guess which reasoning provider family a model id belongs to.
+ * Used by the chat UI to offer a thinking-level selector for any model,
+ * including models served through Copilot or custom OpenAI-compatible
+ * endpoints where only the model name is known.
+ */
+export function inferReasoningProviderFromModel(
+  modelName?: string,
+): ReasoningProvider | null {
+  const normalized = normalizeModelName(modelName);
+  if (!normalized) return null;
+  // Drop vendor prefixes like "openrouter/google/" or "provider:".
+  const bare = normalized.replace(/^.*[/:]/, "");
+  if (/^(gpt-|o\d+(?:\b|[.-])|codex)/.test(bare)) return "openai";
+  if (/gemini/.test(bare)) return "gemini";
+  if (/^claude/.test(bare)) return "anthropic";
+  if (/^deepseek/.test(bare)) return "deepseek";
+  if (/^(kimi|moonshot)/.test(bare)) return "kimi";
+  if (/^(qwen|qwq)/.test(bare)) return "qwen";
+  if (/^grok/.test(bare)) return "grok";
+  return null;
 }
 
 function resolveProviderProfile(

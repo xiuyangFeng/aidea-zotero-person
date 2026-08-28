@@ -45,7 +45,6 @@ export type ModelChoice = {
 /** Human-readable labels for known OAuth providers. */
 const OAUTH_PROVIDER_LABELS: Record<OAuthProviderId, string> = {
   "openai-codex": "Codex",
-  "google-gemini-cli": "Gemini",
   "github-copilot": "Copilot",
 };
 
@@ -182,6 +181,24 @@ export function persistModelProvider(provider: string): void {
     Zotero.Prefs.set(
       `${addon.data.config.prefsPrefix}.${LAST_MODEL_PROVIDER_PREF}`,
       provider,
+      true,
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+const LAST_REASONING_LEVEL_PREF = "lastUsedReasoningLevel";
+
+export function getPersistedReasoningLevel(): string {
+  return getStringPref(LAST_REASONING_LEVEL_PREF).trim();
+}
+
+export function persistReasoningLevel(level: string): void {
+  try {
+    Zotero.Prefs.set(
+      `${addon.data.config.prefsPrefix}.${LAST_REASONING_LEVEL_PREF}`,
+      level,
       true,
     );
   } catch {

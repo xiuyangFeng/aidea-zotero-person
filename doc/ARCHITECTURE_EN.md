@@ -368,7 +368,7 @@ onDelta(token) → assistantMessage.text += token
 | `modelSelectionController.ts`      | 6KB   | Model selection & persistence                   |
 | `conversationHistoryController.ts` | 2KB   | Conversation history management                 |
 | `menuController.ts`                | 2KB   | Menu state control                              |
-| `modelReasoningController.ts`      | 0.4KB | Reasoning mode detection                        |
+| `screenshotPolicyController.ts`    | 0.4KB | Model-specific screenshot gating                |
 
 ---
 

@@ -7,6 +7,10 @@ import type {
   DocumentPresentation,
   DocumentStructure,
 } from "./document/types";
+import type {
+  ReasoningLevel,
+  ReasoningProvider,
+} from "../../utils/reasoningProfiles";
 
 export type SelectedTextSource = "pdf" | "model";
 export type SelectedTextContext = {
@@ -69,9 +73,18 @@ export type ActionDropdownSpec = {
   menuClassName: string;
   disabled?: boolean;
 };
+export type ReasoningSelection = {
+  provider: ReasoningProvider;
+  level: ReasoningLevel;
+};
+
 export type AdvancedModelParams = {
-  temperature: number;
-  maxTokens: number;
+  /** Only sent when the user explicitly configured a value. */
+  temperature?: number;
+  /** Only sent when the user explicitly configured a value. */
+  maxTokens?: number;
+  /** Thinking-level selection from the chat action bar. */
+  reasoning?: ReasoningSelection;
 };
 export type ApiProfile = {
   apiBase: string;

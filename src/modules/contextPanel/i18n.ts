@@ -39,6 +39,8 @@ export type PanelI18n = {
   modelNoModels: string;
   modelClickChoose: string;
   modelOnlyOne: string;
+  reasoningSelectHint: string;
+  reasoningClickChoose: string;
   chatReadinessTitle: string;
   chatReadinessNoModels: string;
   chatReadinessSelectModel: string;
@@ -50,6 +52,9 @@ export type PanelI18n = {
   noEditableLatestPrompt: string;
   referencePickerReady: string;
   paperAlreadySelected: string;
+  addSelectedLibraryItems: string;
+  noLibrarySelection: string;
+  paperContextBatchAdded: (added: number, skipped: number) => string;
   paperContextAdded: (n: number, max: number) => string;
   cancelled: string;
   retry: string;
@@ -65,6 +70,8 @@ export type PanelI18n = {
   keyPoints: string;
   methodology: string;
   limitations: string;
+  compare: string;
+  literatureReview: string;
   deleteAll: string;
   chatHistory: string;
   deleteAllConfirm: string;
@@ -637,6 +644,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "重點",
     methodology: "方法",
     limitations: "限制",
+    compare: "橫向對比",
+    literatureReview: "文獻綜述",
     chatHistory: "聊天歷史",
     noHistoryYet: "尚無歷史",
     newChat: "新聊天",
@@ -704,6 +713,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "要点",
     methodology: "方法",
     limitations: "限界",
+    compare: "横断比較",
+    literatureReview: "文献レビュー",
     chatHistory: "チャット履歴",
     noHistoryYet: "履歴はまだありません",
     newChat: "新しいチャット",
@@ -771,6 +782,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "핵심 요점",
     methodology: "방법론",
     limitations: "한계",
+    compare: "비교 분석",
+    literatureReview: "문헌 리뷰",
     chatHistory: "채팅 기록",
     noHistoryYet: "기록 없음",
     newChat: "새 채팅",
@@ -840,6 +853,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "Points clés",
     methodology: "Méthodologie",
     limitations: "Limites",
+    compare: "Comparer",
+    literatureReview: "Revue de littérature",
     chatHistory: "Historique du chat",
     noHistoryYet: "Aucun historique",
     newChat: "Nouveau chat",
@@ -907,6 +922,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "Kernpunkte",
     methodology: "Methodik",
     limitations: "Einschränkungen",
+    compare: "Vergleichen",
+    literatureReview: "Literaturübersicht",
     chatHistory: "Chatverlauf",
     noHistoryYet: "Noch kein Verlauf",
     newChat: "Neuer Chat",
@@ -976,6 +993,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "Puntos clave",
     methodology: "Metodología",
     limitations: "Limitaciones",
+    compare: "Comparar",
+    literatureReview: "Revisión bibliográfica",
     chatHistory: "Historial del chat",
     noHistoryYet: "Sin historial",
     newChat: "Nuevo chat",
@@ -1042,6 +1061,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "Ключевые пункты",
     methodology: "Методология",
     limitations: "Ограничения",
+    compare: "Сравнить",
+    literatureReview: "Обзор литературы",
     chatHistory: "История чата",
     noHistoryYet: "Истории пока нет",
     newChat: "Новый чат",
@@ -1111,6 +1132,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "Pontos-chave",
     methodology: "Metodologia",
     limitations: "Limitações",
+    compare: "Comparar",
+    literatureReview: "Revisão de literatura",
     chatHistory: "Histórico do chat",
     noHistoryYet: "Sem histórico",
     newChat: "Novo chat",
@@ -1177,6 +1200,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "النقاط الرئيسية",
     methodology: "المنهجية",
     limitations: "القيود",
+    compare: "مقارنة",
+    literatureReview: "مراجعة الأدبيات",
     chatHistory: "سجل المحادثة",
     noHistoryYet: "لا يوجد سجل بعد",
     newChat: "محادثة جديدة",
@@ -1244,6 +1269,8 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     keyPoints: "मुख्य बिंदु",
     methodology: "कार्यप्रणाली",
     limitations: "सीमाएँ",
+    compare: "तुलना",
+    literatureReview: "साहित्य समीक्षा",
     chatHistory: "चैट इतिहास",
     noHistoryYet: "अभी कोई इतिहास नहीं",
     newChat: "नई चैट",
@@ -1292,10 +1319,16 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     statusNoContext: "目前沒有論文上下文，輸入 @ 可加入論文。",
     modelClickChoose: "點擊選擇模型",
     modelOnlyOne: "目前只設定了一個模型",
+    reasoningSelectHint: "思考程度",
+    reasoningClickChoose: "點擊選擇思考程度",
     conversationLoaded: "對話已載入",
     noEditableLatestPrompt: "沒有可編輯的最近提問",
     referencePickerReady: "引用選擇器已就緒，輸入 @ 後繼續搜尋論文。",
     paperAlreadySelected: "該論文已加入",
+    addSelectedLibraryItems: "加入選取的文獻",
+    noLibrarySelection: "請先在文庫中選取文獻",
+    paperContextBatchAdded: (added, skipped) =>
+      `已加入 ${added} 篇文獻${skipped ? `，略過 ${skipped} 篇` : ""}`,
     paperContextAdded: (n, max) => `已加入論文上下文（${n}/${max}）`,
     cancelled: "已取消",
     addTextPopupTitle: "將選取文字加入 LLM 面板",
@@ -1438,11 +1471,17 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "有効な論文コンテキストがありません。@ で論文を追加できます。",
     modelClickChoose: "クリックしてモデルを選択",
     modelOnlyOne: "設定済みのモデルは 1 つだけです",
+    reasoningSelectHint: "思考レベル",
+    reasoningClickChoose: "クリックして思考レベルを選択",
     conversationLoaded: "会話を読み込みました",
     noEditableLatestPrompt: "編集できる最新の質問がありません",
     referencePickerReady:
       "文献ピッカーの準備ができました。@ の後に入力して検索してください。",
     paperAlreadySelected: "この論文はすでに追加されています",
+    addSelectedLibraryItems: "選択中の文献を追加",
+    noLibrarySelection: "先にライブラリで文献を選択してください",
+    paperContextBatchAdded: (added, skipped) =>
+      `${added} 件の文献を追加しました${skipped ? `（${skipped} 件をスキップ）` : ""}`,
     paperContextAdded: (n, max) =>
       `論文コンテキストを追加しました（${n}/${max}）`,
     cancelled: "キャンセルしました",
@@ -1594,11 +1633,17 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "활성 논문 컨텍스트가 없습니다. @를 입력해 논문을 추가하세요.",
     modelClickChoose: "클릭하여 모델 선택",
     modelOnlyOne: "설정된 모델이 하나뿐입니다",
+    reasoningSelectHint: "사고 수준",
+    reasoningClickChoose: "클릭하여 사고 수준 선택",
     conversationLoaded: "대화를 불러왔습니다",
     noEditableLatestPrompt: "편집할 최신 질문이 없습니다",
     referencePickerReady:
       "참고문헌 선택기가 준비되었습니다. @ 뒤에 입력해 논문을 검색하세요.",
     paperAlreadySelected: "이미 추가된 논문입니다",
+    addSelectedLibraryItems: "선택한 문헌 추가",
+    noLibrarySelection: "먼저 라이브러리에서 문헌을 선택하세요",
+    paperContextBatchAdded: (added, skipped) =>
+      `문헌 ${added}편을 추가했습니다${skipped ? ` (${skipped}편 건너뜀)` : ""}`,
     paperContextAdded: (n, max) =>
       `논문 컨텍스트가 추가되었습니다 (${n}/${max})`,
     cancelled: "취소됨",
@@ -1749,11 +1794,18 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "Aucun contexte d'article actif. Tapez @ pour ajouter des articles.",
     modelClickChoose: "Cliquer pour choisir un modèle",
     modelOnlyOne: "Un seul modèle est configuré",
+    reasoningSelectHint: "Niveau de réflexion",
+    reasoningClickChoose: "Cliquez pour choisir le niveau de réflexion",
     conversationLoaded: "Conversation chargée",
     noEditableLatestPrompt: "Aucune dernière question modifiable",
     referencePickerReady:
       "Sélecteur de références prêt. Tapez après @ pour chercher des articles.",
     paperAlreadySelected: "Article déjà ajouté",
+    addSelectedLibraryItems: "Ajouter la sélection",
+    noLibrarySelection:
+      "Sélectionnez d'abord des documents dans la bibliothèque",
+    paperContextBatchAdded: (added, skipped) =>
+      `${added} document(s) ajouté(s)${skipped ? `, ${skipped} ignoré(s)` : ""}`,
     paperContextAdded: (n, max) => `Contexte d'article ajouté (${n}/${max})`,
     cancelled: "Annulé",
     addTextPopupTitle: "Ajouter le texte sélectionné au panneau LLM",
@@ -1911,11 +1963,17 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "Kein aktiver Paper-Kontext. Tippen Sie @, um Paper hinzuzufügen.",
     modelClickChoose: "Klicken, um ein Modell auszuwählen",
     modelOnlyOne: "Nur ein Modell ist konfiguriert",
+    reasoningSelectHint: "Denkstufe",
+    reasoningClickChoose: "Klicken, um die Denkstufe zu wählen",
     conversationLoaded: "Unterhaltung geladen",
     noEditableLatestPrompt: "Keine bearbeitbare letzte Frage",
     referencePickerReady:
       "Referenzauswahl bereit. Tippen Sie nach @, um Paper zu suchen.",
     paperAlreadySelected: "Paper bereits ausgewählt",
+    addSelectedLibraryItems: "Auswahl hinzufügen",
+    noLibrarySelection: "Wählen Sie zuerst Einträge in der Bibliothek aus",
+    paperContextBatchAdded: (added, skipped) =>
+      `${added} Dokument(e) hinzugefügt${skipped ? `, ${skipped} übersprungen` : ""}`,
     paperContextAdded: (n, max) => `Paper-Kontext hinzugefügt (${n}/${max})`,
     cancelled: "Abgebrochen",
     addTextPopupTitle: "Ausgewählten Text zum LLM-Panel hinzufügen",
@@ -2074,11 +2132,17 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "No hay contexto de artículo activo. Escribe @ para añadir artículos.",
     modelClickChoose: "Haz clic para elegir un modelo",
     modelOnlyOne: "Solo hay un modelo configurado",
+    reasoningSelectHint: "Nivel de razonamiento",
+    reasoningClickChoose: "Haz clic para elegir el nivel de razonamiento",
     conversationLoaded: "Conversación cargada",
     noEditableLatestPrompt: "No hay una última pregunta editable",
     referencePickerReady:
       "Selector de referencias listo. Escribe después de @ para buscar artículos.",
     paperAlreadySelected: "Artículo ya seleccionado",
+    addSelectedLibraryItems: "Añadir la selección",
+    noLibrarySelection: "Primero selecciona elementos en la biblioteca",
+    paperContextBatchAdded: (added, skipped) =>
+      `${added} documento(s) añadido(s)${skipped ? `, ${skipped} omitido(s)` : ""}`,
     paperContextAdded: (n, max) => `Contexto de artículo añadido (${n}/${max})`,
     cancelled: "Cancelado",
     addTextPopupTitle: "Añadir texto seleccionado al panel LLM",
@@ -2234,11 +2298,17 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "Нет активного контекста статьи. Введите @, чтобы добавить статьи.",
     modelClickChoose: "Нажмите, чтобы выбрать модель",
     modelOnlyOne: "Настроена только одна модель",
+    reasoningSelectHint: "Уровень рассуждений",
+    reasoningClickChoose: "Нажмите, чтобы выбрать уровень рассуждений",
     conversationLoaded: "Диалог загружен",
     noEditableLatestPrompt: "Нет последнего вопроса для редактирования",
     referencePickerReady:
       "Выбор ссылок готов. Введите текст после @ для поиска статей.",
     paperAlreadySelected: "Статья уже выбрана",
+    addSelectedLibraryItems: "Добавить выбранное",
+    noLibrarySelection: "Сначала выберите записи в библиотеке",
+    paperContextBatchAdded: (added, skipped) =>
+      `Добавлено документов: ${added}${skipped ? `, пропущено: ${skipped}` : ""}`,
     paperContextAdded: (n, max) => `Контекст статьи добавлен (${n}/${max})`,
     cancelled: "Отменено",
     addTextPopupTitle: "Добавить выделенный текст на панель LLM",
@@ -2393,11 +2463,17 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "Nenhum contexto de artigo ativo. Digite @ para adicionar artigos.",
     modelClickChoose: "Clique para escolher um modelo",
     modelOnlyOne: "Apenas um modelo está configurado",
+    reasoningSelectHint: "Nível de raciocínio",
+    reasoningClickChoose: "Clique para escolher o nível de raciocínio",
     conversationLoaded: "Conversa carregada",
     noEditableLatestPrompt: "Nenhuma pergunta recente editável",
     referencePickerReady:
       "Seletor de referências pronto. Digite após @ para buscar artigos.",
     paperAlreadySelected: "Artigo já selecionado",
+    addSelectedLibraryItems: "Adicionar a seleção",
+    noLibrarySelection: "Selecione itens na biblioteca primeiro",
+    paperContextBatchAdded: (added, skipped) =>
+      `${added} documento(s) adicionado(s)${skipped ? `, ${skipped} ignorado(s)` : ""}`,
     paperContextAdded: (n, max) =>
       `Contexto de artigo adicionado (${n}/${max})`,
     cancelled: "Cancelado",
@@ -2552,10 +2628,16 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     statusNoContext: "لا يوجد سياق ورقة نشط. اكتب @ لإضافة أوراق.",
     modelClickChoose: "انقر لاختيار نموذج",
     modelOnlyOne: "تم تكوين نموذج واحد فقط",
+    reasoningSelectHint: "مستوى التفكير",
+    reasoningClickChoose: "انقر لاختيار مستوى التفكير",
     conversationLoaded: "تم تحميل المحادثة",
     noEditableLatestPrompt: "لا يوجد آخر سؤال قابل للتحرير",
     referencePickerReady: "محدد المراجع جاهز. اكتب بعد @ للبحث عن أوراق.",
     paperAlreadySelected: "تم اختيار هذه الورقة مسبقًا",
+    addSelectedLibraryItems: "إضافة العناصر المحددة",
+    noLibrarySelection: "اختر عناصر من المكتبة أولاً",
+    paperContextBatchAdded: (added, skipped) =>
+      `تمت إضافة ${added} مستند${skipped ? ` وتخطي ${skipped}` : ""}`,
     paperContextAdded: (n, max) => `تمت إضافة سياق الورقة (${n}/${max})`,
     cancelled: "تم الإلغاء",
     addTextPopupTitle: "إضافة النص المحدد إلى لوحة LLM",
@@ -2699,11 +2781,17 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
       "कोई सक्रिय पेपर संदर्भ नहीं है। पेपर जोड़ने के लिए @ टाइप करें।",
     modelClickChoose: "मॉडल चुनने के लिए क्लिक करें",
     modelOnlyOne: "केवल एक मॉडल कॉन्फ़िगर है",
+    reasoningSelectHint: "सोच स्तर",
+    reasoningClickChoose: "सोच स्तर चुनने के लिए क्लिक करें",
     conversationLoaded: "बातचीत लोड हुई",
     noEditableLatestPrompt: "संपादित करने योग्य नवीनतम प्रश्न नहीं है",
     referencePickerReady:
       "संदर्भ चयन तैयार है। पेपर खोजने के लिए @ के बाद टाइप करें।",
     paperAlreadySelected: "पेपर पहले से चुना गया है",
+    addSelectedLibraryItems: "चयनित दस्तावेज़ जोड़ें",
+    noLibrarySelection: "पहले लाइब्रेरी में दस्तावेज़ चुनें",
+    paperContextBatchAdded: (added, skipped) =>
+      `${added} दस्तावेज़ जोड़े गए${skipped ? `, ${skipped} छोड़े गए` : ""}`,
     paperContextAdded: (n, max) => `पेपर संदर्भ जोड़ा गया (${n}/${max})`,
     cancelled: "रद्द किया गया",
     addTextPopupTitle: "चयनित टेक्स्ट को LLM पैनल में जोड़ें",
@@ -3764,6 +3852,8 @@ export function getPanelI18n(): PanelI18n {
       modelNoModels: "No models available. Login and refresh in Settings.",
       modelClickChoose: "Click to choose a model",
       modelOnlyOne: "Only one model is configured",
+      reasoningSelectHint: "Thinking level",
+      reasoningClickChoose: "Click to choose the thinking level",
       chatReadinessTitle: "AIdea is not ready yet",
       chatReadinessNoModels:
         "No available model. Open AIdea Settings to log in or refresh models.",
@@ -3779,6 +3869,10 @@ export function getPanelI18n(): PanelI18n {
       referencePickerReady:
         "Reference picker ready. Type after @ to search papers.",
       paperAlreadySelected: "Paper already selected",
+      addSelectedLibraryItems: "Add selected items",
+      noLibrarySelection: "Select items in the library first",
+      paperContextBatchAdded: (added, skipped) =>
+        `Added ${added} paper(s)${skipped ? `, skipped ${skipped}` : ""}`,
       paperContextAdded: (n, max) => `Paper context added (${n}/${max})`,
       cancelled: "Cancelled",
       retry: "Retry",
@@ -3794,6 +3888,8 @@ export function getPanelI18n(): PanelI18n {
       keyPoints: "Key Points",
       methodology: "Methodology",
       limitations: "Limitations",
+      compare: "Compare",
+      literatureReview: "Literature Review",
       deleteAll: "Delete all",
       chatHistory: "Chat History",
       deleteAllConfirm: "All conversations deleted",
@@ -4063,6 +4159,8 @@ export function getPanelI18n(): PanelI18n {
     modelNoModels: "暂无模型，请在设置中登录 OAuth 并刷新模型列表。",
     modelClickChoose: "点击选择模型",
     modelOnlyOne: "当前仅配置了一个模型",
+    reasoningSelectHint: "思考程度",
+    reasoningClickChoose: "点击选择思考程度",
     chatReadinessTitle: "AIdea 尚未准备好",
     chatReadinessNoModels: "当前没有可用模型。请在设置中登录或刷新模型列表。",
     chatReadinessSelectModel: "请选择一个模型后再开始对话。",
@@ -4075,6 +4173,10 @@ export function getPanelI18n(): PanelI18n {
     noEditableLatestPrompt: "没有可编辑的最近一条提问",
     referencePickerReady: "引用选择器已就绪，输入 @ 后继续键入搜索论文。",
     paperAlreadySelected: "该论文已添加",
+    addSelectedLibraryItems: "添加选中的文献",
+    noLibrarySelection: "请先在文库中选中文献",
+    paperContextBatchAdded: (added, skipped) =>
+      `已添加 ${added} 篇文献${skipped ? `，跳过 ${skipped} 篇` : ""}`,
     paperContextAdded: (n, max) => `已添加论文上下文（${n}/${max}）`,
     cancelled: "已取消",
     retry: "重试",
@@ -4090,6 +4192,8 @@ export function getPanelI18n(): PanelI18n {
     keyPoints: "关键要点",
     methodology: "研究方法",
     limitations: "局限性",
+    compare: "横向对比",
+    literatureReview: "文献综述",
     deleteAll: "全部删除",
     chatHistory: "聊天记录",
     deleteAllConfirm: "已删除所有对话",

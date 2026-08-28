@@ -15,6 +15,7 @@ import { setupHandlers } from "./setupHandlers";
 import { ensureConversationLoaded, refreshChat } from "./chat";
 import { renderShortcuts } from "./shortcuts";
 import { createGlobalPortalItem, resolveActiveLibraryID } from "./portalScope";
+import { resetManagedListeners } from "./managedListeners";
 import { config } from "../../../package.json";
 import {
   createGlobalConversation,
@@ -700,6 +701,7 @@ export function removeLibraryPanel(win: Window): void {
       }
     ).__llmHeightSync;
     heightSync?.dispose?.();
+    resetManagedListeners(state.host);
     state.host.remove();
   }
 

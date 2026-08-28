@@ -45,8 +45,9 @@ export type CreateDocumentTextContextOptions = {
 
 export type BuildDocumentContextOptions = {
   /**
-   * Compatibility flag retained for existing PDF callers. Historically this
-   * was diagnostic-only; use contextStrategy for adapter policy.
+   * Skip the whole-document branch even when the adapter policy allows it.
+   * Used when one request carries several documents, so each contributes
+   * query-relevant excerpts within its own budget instead of a full dump.
    */
   forceRetrieval?: boolean;
   contextStrategy?: "full-or-retrieval" | "retrieval";
@@ -500,7 +501,11 @@ export async function buildDocumentContext(
       ? MAX_CONTEXT_LENGTH_WITH_IMAGE
       : MAX_CONTEXT_LENGTH;
 
-  if (FORCE_FULL_CONTEXT && contextStrategy === "full-or-retrieval") {
+  if (
+    FORCE_FULL_CONTEXT &&
+    contextStrategy === "full-or-retrieval" &&
+    !forceRetrieval
+  ) {
     if (!fullLength || fullLength <= FULL_CONTEXT_CHAR_LIMIT) {
       contextParts.push(labels.fullText);
       contextParts.push(chunks.join("\n\n"));

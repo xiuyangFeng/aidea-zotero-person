@@ -22,11 +22,10 @@
   <strong>🌐 Website:</strong> <a href="https://visterainer.github.io/aidea-zotero/zh-tw/">https://visterainer.github.io/aidea-zotero/zh-tw/</a>
 </p>
 
-AIdea 是一款面向 Zotero 的免費開源 AI 研究助手外掛。🔐 支援 OpenAI（ChatGPT）、Google Gemini、GitHub Copilot 的 OAuth 登入。⚙️ 也支援 OpenAI 相容 API，以及透過 Ollama、LM Studio、vLLM 等環境接入本地或自託管模型。它可將多提供商對話、論文上下文分析、筆記匯出、記憶能力與全文翻譯整合到 Zotero 的資料庫檢視、PDF 閱讀器與 EPUB 閱讀器中。
+AIdea 是一款面向 Zotero 的免費開源 AI 研究助手外掛。🔐 支援 OpenAI（ChatGPT）與 GitHub Copilot 的 OAuth 登入。⚙️ 也支援 OpenAI 相容 API，以及透過 Ollama、LM Studio、vLLM 等環境接入本地或自託管模型。它可將多提供商對話、論文上下文分析、筆記匯出、記憶能力與全文翻譯整合到 Zotero 的資料庫檢視、PDF 閱讀器與 EPUB 閱讀器中。
 
 <p align="center">
   <img alt="OpenAI ChatGPT" src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" />
-  <img alt="Google Gemini" src="https://img.shields.io/badge/Google-Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img alt="GitHub Copilot" src="https://img.shields.io/badge/GitHub-Copilot-111111?style=for-the-badge&logo=github&logoColor=white" />
 </p>
 
@@ -87,9 +86,10 @@ AIdea 面向需要在 Zotero 內完成論文與電子書閱讀、追問、摘錄
 | 方式              | 驗證方式                         | 說明                                    |
 | ----------------- | -------------------------------- | --------------------------------------- |
 | OpenAI（ChatGPT） | 透過 Codex CLI 完成 OAuth        | 外掛可在需要時自動安裝 Node.js 執行環境 |
-| Google Gemini     | 外掛內 OAuth（PKCE）             | 外掛可在需要時自動安裝 Node.js 執行環境 |
 | GitHub Copilot    | 外掛內 OAuth（Device Code）      | 無需額外的 Node.js 啟動步驟             |
 | OpenAI 相容端點   | API Base URL、模型與可選 API Key | 適用於本地、自託管或第三方相容服務      |
+
+> **注意：** 由於 Google 已於 2026 年 6 月 18 日關閉個人帳號（含 Google AI Pro/Ultra）的 Code Assist OAuth 通道，Gemini CLI OAuth 支援已移除。Gemini 模型仍可透過 Gemini API 金鑰搭配任意 OpenAI 相容自訂端點使用，或透過 GitHub Copilot 的模型目錄使用。
 
 ## 安裝
 

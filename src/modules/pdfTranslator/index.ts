@@ -24,6 +24,27 @@ export type TranslateEvent =
   | { type: "error"; message: string };
 
 /**
+ * Controllers with a running subprocess. Tracked so the plugin shutdown hook
+ * can kill pdf2zh/python bridges — without this, closing Zotero mid-job
+ * leaves orphan processes consuming API quota until they finish or crash.
+ */
+const runningControllers = new Set<TranslateController>();
+
+/**
+ * Kill every running translation subprocess. Synchronous (nsIProcess kill),
+ * so it is safe to call from the shutdown hook while Zotero is quitting.
+ */
+export function abortAllTranslationJobs(): void {
+  for (const controller of Array.from(runningControllers)) {
+    try {
+      controller.abort();
+    } catch (err) {
+      ztoolkit.log("LLM: failed to abort translation job on shutdown", err);
+    }
+  }
+}
+
+/**
  * TranslateController  –  manages the lifecycle of a single translation job.
  *
  * Usage:
@@ -295,6 +316,11 @@ export class TranslateController {
 
   private setState(s: TranslateState): void {
     this.state = s;
+    if (s === "running") {
+      runningControllers.add(this);
+    } else {
+      runningControllers.delete(this);
+    }
     this.callback({ type: "state", state: s });
   }
 

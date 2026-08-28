@@ -1,5 +1,4 @@
 import { config } from "../../../package.json";
-import { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
 
 // =============================================================================
 // Constants
@@ -27,7 +26,8 @@ export const SELECTED_TEXT_MAX_LENGTH = 4000;
 export const SELECTED_TEXT_PREVIEW_LENGTH = 240;
 export const MAX_SELECTED_TEXT_CONTEXTS = 20;
 export const INLINE_CONTEXT_COLLAPSE_THRESHOLD = 3;
-export const MAX_EDITABLE_SHORTCUTS = 10;
+// Keeps five user-defined slots available alongside the built-in shortcuts.
+export const MAX_EDITABLE_SHORTCUTS = 12;
 export const MAX_SELECTED_IMAGES = 50;
 export const MAX_UPLOAD_PDF_SIZE_BYTES = 50 * 1024 * 1024;
 export const MAX_SELECTED_PAPER_CONTEXTS = 20;
@@ -74,7 +74,6 @@ export const SCREENSHOT_EXPANDED_LABEL = "Screenshots";
 export const SCREENSHOT_COMPACT_LABEL = "";
 export const UPLOAD_FILE_EXPANDED_LABEL = "";
 export const UPLOAD_FILE_COMPACT_LABEL = "";
-export const REASONING_COMPACT_LABEL = "";
 export const ACTION_LAYOUT_FULL_MODE_BUFFER_PX = 0;
 export const ACTION_LAYOUT_PARTIAL_MODE_BUFFER_PX = 0;
 export const ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX = 36;
@@ -89,6 +88,8 @@ export const BUILTIN_SHORTCUT_FILES = [
   { id: "key-points", label: "Key Points", file: "key-points.txt" },
   { id: "methodology", label: "Methodology", file: "methodology.txt" },
   { id: "limitations", label: "Limitations", file: "limitations.txt" },
+  { id: "compare", label: "Compare", file: "compare.txt" },
+  { id: "review", label: "Literature Review", file: "review.txt" },
 ] as const;
 
 export const STOPWORDS = new Set([
@@ -226,4 +227,3 @@ export const MODEL_PROFILE_SUFFIX: Record<ModelProfileKey, string> = {
 };
 
 export { config };
-export type { LLMReasoningLevel };
