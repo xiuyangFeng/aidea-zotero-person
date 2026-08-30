@@ -129,6 +129,7 @@ import {
   createPageAnchorHrefResolver,
   type PageAnchorScopeOptions,
 } from "./pageAnchorTargets";
+import { upgradePageAnchorSentences } from "./pageAnchorSentences";
 import {
   isSuggestedQuestionsEnabled,
   splitSuggestedQuestions,
@@ -4263,6 +4264,11 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           bubble.appendChild(streamingContent);
         } else {
           renderAssistantMarkdown(bubble);
+          // Chips are folded into sentence links only once the answer is
+          // final; while it streams the sentence a chip belongs to is still
+          // being written. The cached HTML keeps the chips, so this pass runs
+          // on every insertion, cache hit or not.
+          upgradePageAnchorSentences(bubble);
         }
         bubble.addEventListener("contextmenu", (e: Event) => {
           const me = e as MouseEvent;

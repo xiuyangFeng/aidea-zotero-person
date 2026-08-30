@@ -14,6 +14,7 @@ import {
   type TextBlock,
 } from "../../utils/markdown";
 import { sanitizeText } from "./textUtils";
+import { upgradePageAnchorSentences } from "./pageAnchorSentences";
 import {
   stripStreamingSuggestedQuestions,
   stripSuggestedQuestions,
@@ -299,7 +300,11 @@ export function finalizeStreamingBubble(
     contentEl.innerHTML = html;
   } catch {
     contentEl.textContent = safeText;
+    return;
   }
+  // The answer is complete, so every page-anchor chip now has its full
+  // sentence in front of it and can be folded into a sentence jump link.
+  upgradePageAnchorSentences(contentEl);
 }
 
 // ---------------------------------------------------------------------------

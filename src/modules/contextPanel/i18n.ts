@@ -324,6 +324,7 @@ export type PanelI18n = {
   pdfAttachment: string;
   pageAnchorOpening: (label: string) => string;
   pageAnchorUnavailable: string;
+  pageAnchorJumpTo: (page: number, endPage?: number) => string;
   trLogFullPath: string;
   trLogOutputFormat: (mono: boolean, dual: boolean) => string;
   trLogResolvingCredentials: string;
@@ -4366,6 +4367,8 @@ export function getPanelI18n(): PanelI18n {
       pdfAttachment: "PDF attachment",
       pageAnchorOpening: (label) => `Opening ${label}`,
       pageAnchorUnavailable: "Cannot locate the cited page in this library",
+      pageAnchorJumpTo: (page, endPage) =>
+        endPage ? `Jump to pages ${page}-${endPage}` : `Jump to page ${page}`,
       trLogFullPath: "Full path",
       trLogOutputFormat: (mono, dual) =>
         `Output format: Mono=${mono} | Dual=${dual}`,
@@ -4749,6 +4752,8 @@ export function getPanelI18n(): PanelI18n {
     pdfAttachment: "PDF 附件",
     pageAnchorOpening: (label) => `正在跳转到 ${label}`,
     pageAnchorUnavailable: "无法在文献库中定位该引用页",
+    pageAnchorJumpTo: (page, endPage) =>
+      endPage ? `跳转到第 ${page}-${endPage} 页` : `跳转到第 ${page} 页`,
     trLogFullPath: "完整路径",
     trLogOutputFormat: (mono, dual) => `输出格式：单语=${mono} | 双语=${dual}`,
     trLogResolvingCredentials: "正在解析模型凭证...",

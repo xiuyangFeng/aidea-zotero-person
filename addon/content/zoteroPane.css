@@ -4554,6 +4554,61 @@
   );
 }
 
+/* Sentence-level page anchor: in chat the `p.12` chip is folded away and the
+ * sentence it cited becomes the jump target, so an answer reads as prose.
+ * Every declaration the chip rule sets has to be undone here, and the selector
+ * stays at least as specific as the themed chip rules above so it still wins
+ * inside a themed composer surface. */
+.llm-page-anchor.llm-page-anchor-sentence,
+.llm-panel[data-composer-theme-surface="true"]
+  .llm-page-anchor.llm-page-anchor-sentence {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  white-space: normal;
+  user-select: text;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 45%,
+    transparent
+  );
+  text-underline-offset: 0.2em;
+  transition:
+    color 0.15s,
+    text-decoration-color 0.15s;
+}
+
+.llm-page-anchor.llm-page-anchor-sentence:hover,
+.llm-panel[data-composer-theme-surface="true"]
+  .llm-page-anchor.llm-page-anchor-sentence:hover {
+  border: none;
+  background: none;
+  color: var(--llm-theme-link, var(--llm-theme-accent, var(--color-accent)));
+  text-decoration-style: solid;
+  text-decoration-color: var(
+    --llm-theme-link,
+    var(--llm-theme-accent, var(--color-accent))
+  );
+}
+
+.llm-page-anchor.llm-page-anchor-sentence:focus-visible,
+.llm-panel[data-composer-theme-surface="true"]
+  .llm-page-anchor.llm-page-anchor-sentence:focus-visible {
+  outline: 1px solid var(--llm-theme-accent, var(--color-accent));
+  outline-offset: 2px;
+  border-radius: var(--llm-radius-xs, 4px);
+}
+
 /* Follow-up question chips under an assistant answer.
  * Styled after the composer's shortcut chips so both read as "one click sends
  * this", but allowed to wrap: these are sentences, not one-word labels. */
