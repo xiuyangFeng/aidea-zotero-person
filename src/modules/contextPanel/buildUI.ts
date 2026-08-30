@@ -577,15 +577,20 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       textContent: i18n.exportWritingDraft,
     },
   );
+  const makeSlashGroupLabel = (textContent: string) =>
+    createElement(doc, "div", "llm-slash-group-label", { textContent });
   slashMenu.append(
+    makeSlashGroupLabel(i18n.slashGroupContext),
     slashUploadBtn,
     slashReferenceBtn,
     slashLibraryBtn,
     slashAnnotationsBtn,
+    makeSlashGroupLabel(i18n.slashGroupReading),
     slashAnnotationSummaryBtn,
     slashReadingCardBtn,
     slashConceptExtractBtn,
     slashConceptRecordBtn,
+    makeSlashGroupLabel(i18n.slashGroupExport),
     slashGlossaryExportBtn,
     slashWritingDraftBtn,
   );

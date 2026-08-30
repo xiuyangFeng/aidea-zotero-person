@@ -56,6 +56,9 @@ export type PanelI18n = {
   noLibrarySelection: string;
   paperContextBatchAdded: (added: number, skipped: number) => string;
   paperContextAdded: (n: number, max: number) => string;
+  slashGroupContext: string;
+  slashGroupReading: string;
+  slashGroupExport: string;
   addMyAnnotations: string;
   summarizeMyAnnotations: string;
   annotationContextLabel: (count: number) => string;
@@ -3914,6 +3917,9 @@ export function getPanelI18n(): PanelI18n {
       paperContextBatchAdded: (added, skipped) =>
         `Added ${added} paper(s)${skipped ? `, skipped ${skipped}` : ""}`,
       paperContextAdded: (n, max) => `Paper context added (${n}/${max})`,
+      slashGroupContext: "Add context",
+      slashGroupReading: "Reading & notes",
+      slashGroupExport: "Export",
       addMyAnnotations: "Add my annotations",
       summarizeMyAnnotations: "Summarize my annotations",
       annotationContextLabel: (count) => `Annotations (${count})`,
@@ -4280,6 +4286,9 @@ export function getPanelI18n(): PanelI18n {
     paperContextBatchAdded: (added, skipped) =>
       `已添加 ${added} 篇文献${skipped ? `，跳过 ${skipped} 篇` : ""}`,
     paperContextAdded: (n, max) => `已添加论文上下文（${n}/${max}）`,
+    slashGroupContext: "添加上下文",
+    slashGroupReading: "阅读与笔记",
+    slashGroupExport: "导出",
     addMyAnnotations: "引入我的标注",
     summarizeMyAnnotations: "汇总我的标注",
     annotationContextLabel: (count) => `标注（${count}）`,
