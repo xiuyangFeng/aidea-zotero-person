@@ -770,7 +770,10 @@ export function initTranslateTab(body: Element): void {
         const { pickPdfFile } = await import("./nativePicker");
         const win = (body.ownerDocument as any)?.defaultView;
         if (!win) return;
-        const path = await pickPdfFile(win);
+        // Open the dialog next to the currently selected PDF, if any
+        const currentPdf = getTranslationSession(body).selectedPdfPath;
+        const startDir = currentPdf.replace(/[\\/][^\\/]*$/, "");
+        const path = await pickPdfFile(win, { startDir });
         if (path) {
           setSelectedPdfPath(body, path, true);
         }
@@ -847,15 +850,16 @@ export function initTranslateTab(body: Element): void {
         const { pickDirectory } = await import("./nativePicker");
         const win = (body.ownerDocument as any)?.defaultView;
         if (!win) return;
-        const path = await pickDirectory(win);
-        if (path) {
-          const dirInput = body.querySelector(
-            "#llm-tr-output-dir",
-          ) as HTMLInputElement | null;
-          if (dirInput) {
-            dirInput.value = path;
-            setStringPref(TRANSLATE_PREFS.outputDir, path);
-          }
+        // Open the dialog in the current output dir (if any) so the user
+        // lands in a familiar, browsable location instead of an empty one
+        const dirInput = body.querySelector(
+          "#llm-tr-output-dir",
+        ) as HTMLInputElement | null;
+        const startDir = (dirInput?.value || "").trim();
+        const path = await pickDirectory(win, { startDir });
+        if (path && dirInput) {
+          dirInput.value = path;
+          setStringPref(TRANSLATE_PREFS.outputDir, path);
         }
       } catch (err) {
         const i18n = getPanelI18n();

@@ -93,12 +93,8 @@ export function buildTranslatePanel(
       textContent: i18n.trSelectLocalPdf,
     },
   );
-  const trDropHint = createElement(doc, "div", "llm-tr-drop-hint", {
-    id: "llm-tr-drop-hint",
-    textContent: i18n.trPdfDropHint,
-  });
   trInputPathRow.append(trPdfName, trPickFileBtn);
-  trInputPathSection.append(trInputPathLabel, trInputPathRow, trDropHint);
+  trInputPathSection.append(trInputPathLabel, trInputPathRow);
 
   // Save path row: [label] [input] [browse btn] — aligned with input path
   const trSavePathSection = createElement(doc, "div", "llm-tr-path-block");

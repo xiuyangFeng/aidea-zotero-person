@@ -28,6 +28,7 @@ import {
   type PageAnchorScopeOptions,
 } from "./pageAnchorTargets";
 import type { Message } from "./types";
+import { stripSuggestedQuestions } from "../../utils/suggestedQuestions";
 
 /** Fields checked, in order, for the container a work appeared in. */
 const PUBLICATION_FIELDS = [
@@ -249,7 +250,8 @@ export function buildWritingDraftForMessage(
   options: BuildWritingDraftForMessageOptions,
 ): WritingDraftResult {
   return buildWritingDraft({
-    text: options.message.text || "",
+    // The follow-up questions are panel furniture, not prose to draft from.
+    text: stripSuggestedQuestions(options.message.text || ""),
     resolveSource: createWritingSourceResolver({
       ...(options.anchorScope || {}),
       messageId: options.message.messageId ?? null,

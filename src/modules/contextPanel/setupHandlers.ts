@@ -20,6 +20,7 @@ import {
   ACTION_LAYOUT_MODEL_FULL_MAX_LINES,
   MODEL_PROFILE_ORDER,
   CONCEPT_CARDS_SHORTCUT_FILE,
+  PAPER_BRIEFING_SHORTCUT_FILE,
   READING_CARD_SHORTCUT_FILE,
   GLOBAL_HISTORY_LIMIT,
   PAPER_CONVERSATION_KEY_BASE,
@@ -54,6 +55,7 @@ import {
   draftInputCache,
   activePaperConversationByItem,
   pdfTextCache,
+  figureCatalogCache,
 } from "./state";
 import {
   sanitizeText,
@@ -116,6 +118,7 @@ import {
   addSelectedTextContext,
   applySelectedTextPreview,
   getSelectedTextContextEntries,
+  getActiveReaderDocumentAttachmentFromTabs,
   getSelectedTextContexts,
   getSelectedTextExpandedIndex,
   includeSelectedTextFromReader,
@@ -148,6 +151,17 @@ import {
   isReadingCardText,
   resolveReadingCardPageCitations,
 } from "../../utils/readingCard";
+import {
+  AUTO_BRIEFING_TRIGGER_DELAY_MS,
+  buildPaperBriefingPrompt,
+  evaluateAutoBriefingGate,
+  getAutoBriefingMode,
+  shouldStillAutoBrief,
+} from "../../utils/autoBriefing";
+import {
+  isSuggestedQuestionsEnabled,
+  stripSuggestedQuestions,
+} from "../../utils/suggestedQuestions";
 import {
   CONCEPT_GLOSSARY_NOTE_TAG,
   CONCEPT_TERM_MAX_CHARS,
@@ -184,10 +198,28 @@ import {
 } from "../../utils/annotationContext";
 import { loadShortcutText } from "./shortcuts";
 import {
+  ensureDocumentContext,
   getReaderDocumentCapabilities,
   resolveReaderDocument,
   type ReaderDocument,
 } from "./documentContext";
+import {
+  buildFigureExplainPrompt,
+  extractFigureCatalog,
+  type FigureCatalogEntry,
+} from "../../utils/figureCatalog";
+import {
+  CITATION_LIBRARY_LOOKUP_MAX,
+  CITATION_LIBRARY_MATCH_CANDIDATES,
+  CITATION_LIBRARY_MATCH_MIN_SCORE,
+  buildCitationInsightPrompt,
+  buildLibraryTitleQueries,
+  extractCitationMarkers,
+  guessReferenceTitle,
+  resolveCitationReferences,
+  scoreTitleMatch,
+  type CitationResolution,
+} from "../../utils/citationInsight";
 import { getDocumentAdapterForItem } from "./document/registry";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
 import {
@@ -232,6 +264,7 @@ import {
 import type {
   AdvancedModelParams,
   ChatAttachment,
+  DocumentTextContext,
   PaperContextRef,
   ReasoningSelection,
   SelectedTextContext,
@@ -252,6 +285,7 @@ import { getPanelDomRefs } from "./setupHandlers/domRefs";
 import { getPanelI18n, getPanelLang } from "./i18n";
 import { pickChatInputPlaceholder } from "./placeholderTips";
 import {
+  FIGURE_MENU_OPEN_CLASS,
   MODEL_MENU_OPEN_CLASS,
   REASONING_MENU_OPEN_CLASS,
   RETRY_MODEL_MENU_OPEN_CLASS,
@@ -311,6 +345,21 @@ import { createHeightSync } from "./heightSync";
 import { addManagedListener, resetManagedListeners } from "./managedListeners";
 
 const SETTING_TAB_RENDER_VERSION = "2026-06-01-font-theme-layout";
+
+/**
+ * Attachments an automatic briefing has already been scheduled for.
+ *
+ * Module-level rather than per-panel because a reader panel can be rebuilt on
+ * the same document — `invalidateSharedReaderPanelForItem` resets the cached
+ * host and the next render bootstraps again — and a rebuild must not spend a
+ * second request. Long-term idempotency is the empty-conversation rule; this
+ * set only covers the window where the first briefing has been scheduled but
+ * has not yet reached the conversation.
+ *
+ * Session-scoped on purpose: restarting Zotero clears it, which is the
+ * cheapest way to let a user who cleared a conversation get a fresh briefing.
+ */
+const autoBriefingAttemptedItemIds = new Set<number>();
 
 /**
  * Tag options for saving an answer as a note.
@@ -429,7 +478,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashLibraryOption,
     slashAnnotationsOption,
     slashAnnotationSummaryOption,
+    slashPaperBriefingOption,
     slashReadingCardOption,
+    slashFigureNavigatorOption,
+    figureMenu,
+    slashCitationInsightOption,
     slashConceptExtractOption,
     slashConceptRecordOption,
     slashGlossaryExportOption,
@@ -809,6 +862,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     if (uploadBtn) {
       uploadBtn.setAttribute("aria-expanded", "false");
     }
+  };
+  const closeFigureMenu = () => {
+    setFloatingMenuOpen(figureMenu, FIGURE_MENU_OPEN_CLASS, false);
   };
   const isHistoryMenuOpen = () =>
     Boolean(historyMenu && historyMenu.style.display !== "none");
@@ -4358,6 +4414,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           return;
         }
         renderGlobalHistoryMenu();
+        closeFigureMenu();
         positionMenuBelowButton(body, historyMenu, historyToggleBtn);
         historyMenu.style.display = "flex";
         historyToggleBtn.setAttribute("aria-expanded", "true");
@@ -7101,6 +7158,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closeResponseMenu();
       closePromptMenu();
       closeExportMenu();
+      closeFigureMenu();
       positionFloatingMenu(body, slashMenu, uploadBtn);
       setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, true);
       uploadBtn.setAttribute("aria-expanded", "true");
@@ -7413,6 +7471,628 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       void generateReadingCard();
     });
   }
+
+  // ═══════════════════════════════════════════════════════════
+  // Figure navigator — the document's figures and tables as a jump list
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Entries currently rendered in the figure menu, plus the document they were
+   * read from. Rows carry an index into this array, so a click resolves back
+   * to the entry that produced it even after a re-render.
+   */
+  let figureNavigatorEntries: FigureCatalogEntry[] = [];
+  let figureNavigatorAttachmentId = 0;
+  let figureNavigatorPinItem: Zotero.Item | null = null;
+
+  /**
+   * Parse the document's captions once per extraction.
+   *
+   * The key is the attachment, so switching papers switches entries; the
+   * revision covers a re-extraction of the same attachment (page anchors
+   * toggled, file replaced), which produces different text for the same id.
+   *
+   * Chunks are the only stored form of the extracted text. They are split on
+   * paragraph boundaries, so rejoining them restores the line structure the
+   * caption scanner reads; the overlap a very long paragraph gets is wider
+   * than a caption, so a caption straddling a chunk boundary still survives
+   * intact in the next chunk.
+   */
+  const resolveFigureCatalog = (
+    attachmentId: number,
+    context: DocumentTextContext,
+  ): FigureCatalogEntry[] => {
+    const revision = `${context.sourceRevision || ""}|${context.fullLength}|${
+      context.chunks.length
+    }`;
+    const cached = figureCatalogCache.get(attachmentId);
+    if (cached && cached.revision === revision) return cached.entries;
+    const entries = extractFigureCatalog(context.chunks.join("\n\n"));
+    figureCatalogCache.set(attachmentId, { revision, entries });
+    return entries;
+  };
+
+  const createFigureKindIcon = (
+    doc: Document,
+    kind: FigureCatalogEntry["kind"],
+  ): Element => {
+    const svg = doc.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    const paths =
+      kind === "table"
+        ? // Grid: frame plus one vertical and two horizontal rules.
+          ["M2 2.5h12v11H2z", "M2 6h12", "M2 10h12", "M7 2.5v11"]
+        : // Picture: frame, sun, and a mountain ridge.
+          ["M2 2.5h12v11H2z", "M5.5 6.25h.01", "M2 11l3.5-3.5L9 11l2-2 3 3"];
+    for (const d of paths) {
+      const path = doc.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    }
+    return svg;
+  };
+
+  /**
+   * Jump the reader to the page a catalog entry sits on.
+   *
+   * The scope is built from the parsed attachment rather than the
+   * conversation, because the navigator can be opened for a library selection
+   * that has not been pinned into the chat yet.
+   */
+  const openFigureEntryPage = (entry: FigureCatalogEntry) => {
+    if (entry.page === null || !figureNavigatorAttachmentId) return;
+    const anchor = { page: entry.page };
+    const navigated = navigateToPageAnchor(
+      {
+        baseAttachmentId: figureNavigatorAttachmentId,
+        supplementalAttachmentIds: [],
+      },
+      anchor,
+    );
+    if (!status) return;
+    const labels = getPanelI18n();
+    setStatus(
+      status,
+      navigated
+        ? labels.pageAnchorOpening(formatPageAnchorLabel(anchor))
+        : labels.pageAnchorUnavailable,
+      navigated ? "ready" : "error",
+    );
+  };
+
+  /**
+   * Ask the model to read one figure for the user.
+   *
+   * The document's full text is already the conversation's base context, so
+   * only the label and caption need to travel with the prompt; the send path
+   * is the ordinary one, which is what makes the answer a normal chat turn.
+   */
+  const explainFigureEntry = (entry: FigureCatalogEntry) => {
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const prompt = buildFigureExplainPrompt({ entry, lang: getPanelLang() });
+    if (!prompt) return;
+    if (figureNavigatorPinItem) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(
+        figureNavigatorPinItem,
+      );
+      if (paperRef) upsertPaperContext(paperRef, { silent: true });
+    }
+    closeFigureMenu();
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  const renderFigureMenu = (entries: FigureCatalogEntry[]) => {
+    if (!figureMenu) return;
+    const doc = body.ownerDocument as Document;
+    const labels = getPanelI18n();
+    figureMenu.innerHTML = "";
+
+    const header = createElement(doc, "div", "llm-figure-menu-header");
+    header.append(
+      createElement(doc, "span", "llm-figure-menu-title", {
+        textContent: labels.figureNavigatorTitle,
+      }),
+      createElement(doc, "span", "llm-figure-menu-count", {
+        textContent: labels.figureNavigatorCount(entries.length),
+      }),
+    );
+    figureMenu.appendChild(header);
+
+    const list = createElement(doc, "div", "llm-figure-menu-list");
+    entries.forEach((entry, index) => {
+      const row = createElement(doc, "div", "llm-figure-menu-row");
+      const hasPage = entry.page !== null;
+
+      const rowMain = createElement(doc, "button", "llm-figure-menu-row-main", {
+        type: "button",
+      }) as HTMLButtonElement;
+      rowMain.dataset.action = "jump";
+      rowMain.dataset.figureIndex = `${index}`;
+      if (hasPage) {
+        rowMain.title = labels.figureNavigatorJumpAria(
+          entry.label,
+          entry.page as number,
+        );
+        rowMain.setAttribute("aria-label", rowMain.title);
+      } else {
+        rowMain.disabled = true;
+        rowMain.classList.add("is-static");
+      }
+
+      const head = createElement(doc, "span", "llm-figure-row-head");
+      const kindIcon = createElement(doc, "span", "llm-figure-row-kind");
+      kindIcon.appendChild(createFigureKindIcon(doc, entry.kind));
+      head.append(
+        kindIcon,
+        createElement(doc, "span", "llm-figure-row-label", {
+          textContent: entry.label,
+        }),
+        createElement(doc, "span", "llm-figure-row-page", {
+          textContent: hasPage
+            ? formatPageAnchorLabel({ page: entry.page as number })
+            : labels.figureNavigatorNoPage,
+        }),
+      );
+      rowMain.append(
+        head,
+        createElement(doc, "span", "llm-figure-row-caption", {
+          textContent: entry.caption,
+          title: entry.caption,
+        }),
+      );
+      row.appendChild(rowMain);
+
+      const explainBtn = createElement(
+        doc,
+        "button",
+        "llm-figure-row-action llm-figure-row-explain",
+        {
+          type: "button",
+          textContent: labels.figureNavigatorExplain,
+          title: labels.figureNavigatorExplainAria(entry.label),
+        },
+      ) as HTMLButtonElement;
+      explainBtn.dataset.action = "explain";
+      explainBtn.dataset.figureIndex = `${index}`;
+      explainBtn.setAttribute(
+        "aria-label",
+        labels.figureNavigatorExplainAria(entry.label),
+      );
+      row.appendChild(explainBtn);
+
+      list.appendChild(row);
+    });
+    figureMenu.appendChild(list);
+  };
+
+  /**
+   * Built-in "figure navigator" action.
+   *
+   * The document is resolved exactly like the reading card's, so a library
+   * panel without a readable item reports the same thing both actions do
+   * instead of opening an empty list.
+   */
+  const openFigureNavigator = async () => {
+    if (!item || !figureMenu || !uploadBtn) return;
+    const labels = getPanelI18n();
+    const resolved = resolveReadingCardDocument();
+    if (!resolved) {
+      if (status)
+        setStatus(status, labels.figureNavigatorNoDocument, "warning");
+      return;
+    }
+    if (status) setStatus(status, labels.figureNavigatorLoading, "sending");
+
+    let entries: FigureCatalogEntry[] = [];
+    try {
+      const context = await ensureDocumentContext(resolved.document);
+      if (context) {
+        entries = resolveFigureCatalog(resolved.document.item.id, context);
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: figure catalog extraction failed", err);
+    }
+    if (!entries.length) {
+      if (status) setStatus(status, labels.figureNavigatorEmpty, "warning");
+      return;
+    }
+
+    figureNavigatorEntries = entries;
+    figureNavigatorAttachmentId = resolved.document.item.id;
+    // Pinning is deferred to the explain action: browsing the list should not
+    // change what the next ordinary question sends.
+    figureNavigatorPinItem = resolved.pinItem;
+    renderFigureMenu(entries);
+    positionFloatingMenu(body, figureMenu, uploadBtn);
+    setFloatingMenuOpen(figureMenu, FIGURE_MENU_OPEN_CLASS, true);
+    if (status) {
+      setStatus(status, labels.figureNavigatorCount(entries.length), "ready");
+    }
+  };
+
+  if (slashFigureNavigatorOption) {
+    slashFigureNavigatorOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void openFigureNavigator();
+    });
+  }
+
+  if (figureMenu) {
+    figureMenu.addEventListener("click", (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      const actionEl = target?.closest?.(
+        "[data-figure-index]",
+      ) as HTMLElement | null;
+      if (!actionEl) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const index = Number(actionEl.dataset.figureIndex);
+      const entry = Number.isFinite(index)
+        ? figureNavigatorEntries[index]
+        : undefined;
+      if (!entry) return;
+      if (actionEl.dataset.action === "explain") {
+        explainFigureEntry(entry);
+        return;
+      }
+      openFigureEntryPage(entry);
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Citation insight — the works a selected passage cites
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Look one guessed title up in the library this panel works in.
+   *
+   * The precise query runs first and the shortened one only when it finds
+   * nothing, and every hit is scored against the guess — otherwise the loose
+   * query would return any paper sharing an opening phrase. Search is a
+   * best-effort extra: a failure costs the annotation, never the answer.
+   */
+  const findLibraryItemForReference = async (
+    libraryID: number,
+    titleGuess: string,
+  ): Promise<Zotero.Item | null> => {
+    for (const query of buildLibraryTitleQueries(titleGuess)) {
+      let ids: number[];
+      try {
+        const search = new Zotero.Search({ libraryID });
+        search.addCondition("title", "contains", query);
+        ids = await search.search();
+      } catch (err) {
+        ztoolkit.log("LLM: citation library search failed", err);
+        return null;
+      }
+      for (const id of ids.slice(0, CITATION_LIBRARY_MATCH_CANDIDATES)) {
+        const candidate = getZoteroItem(id);
+        if (!candidate?.isRegularItem?.()) continue;
+        let title: string;
+        try {
+          title = String(candidate.getField("title") || "");
+        } catch (_err) {
+          continue;
+        }
+        if (
+          scoreTitleMatch(title, titleGuess) >= CITATION_LIBRARY_MATCH_MIN_SCORE
+        ) {
+          return candidate;
+        }
+      }
+    }
+    return null;
+  };
+
+  /**
+   * Note which cited works the user already owns, and pin those.
+   *
+   * Returns how many were found. The lookup is capped so selecting a whole
+   * related-work paragraph cannot turn into dozens of searches, and every step
+   * swallows its own failure: a library without the paper, a search that
+   * throws, or a pin refused by the context cap must not stop the send.
+   */
+  const attachCitationLibraryMatches = async (
+    resolutions: CitationResolution[],
+  ): Promise<number> => {
+    const libraryID = resolveConceptLibraryID(item);
+    if (!libraryID) return 0;
+    let searched = 0;
+    let matched = 0;
+    for (const resolution of resolutions) {
+      if (searched >= CITATION_LIBRARY_LOOKUP_MAX) break;
+      if (!resolution.reference) continue;
+      const guess = guessReferenceTitle(resolution.reference.text);
+      if (!guess) continue;
+      searched += 1;
+      const found = await findLibraryItemForReference(libraryID, guess);
+      if (!found) continue;
+      matched += 1;
+      try {
+        resolution.libraryTitle =
+          String(found.getField("title") || "") || guess;
+        const paperRef = resolvePaperContextRefFromLibraryItem(found);
+        if (paperRef) upsertPaperContext(paperRef, { silent: true });
+      } catch (err) {
+        ztoolkit.log("LLM: failed to pin a cited paper", err);
+      }
+    }
+    return matched;
+  };
+
+  /**
+   * Built-in "explain the selected citations" action.
+   *
+   * The passage comes from the reader selection rather than the composer,
+   * because the gesture this serves is reading a sentence and wondering what
+   * `[12]` stood for. Markers are parsed before the document is opened, so a
+   * selection carrying no citation costs nothing but the status line.
+   */
+  const explainSelectedCitations = async () => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const selection = getActiveReaderSelectionText(
+      body.ownerDocument as Document,
+      item,
+    );
+    if (!selection.trim()) {
+      if (status) {
+        setStatus(status, labels.citationInsightNoSelection, "warning");
+      }
+      return;
+    }
+    const markers = extractCitationMarkers(selection);
+    if (!markers.length) {
+      if (status) setStatus(status, labels.citationInsightNoMarkers, "warning");
+      return;
+    }
+    const resolved = resolveReadingCardDocument();
+    if (!resolved) {
+      if (status) {
+        setStatus(status, labels.citationInsightNoDocument, "warning");
+      }
+      return;
+    }
+    if (resolved.pinItem) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(resolved.pinItem);
+      if (paperRef) upsertPaperContext(paperRef, { silent: true });
+    }
+    if (status) setStatus(status, labels.citationInsightScanning, "sending");
+
+    // The reference list lives in the document's own text, so a failed
+    // extraction costs the entries but not the answer: a marker with no entry
+    // is still worth asking about from the passage alone.
+    let resolutions: CitationResolution[] = markers.map((marker) => ({
+      marker,
+      reference: null,
+    }));
+    try {
+      const context = await ensureDocumentContext(resolved.document);
+      if (context) {
+        resolutions = resolveCitationReferences(
+          markers,
+          context.chunks.join("\n\n"),
+        );
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: citation reference extraction failed", err);
+    }
+
+    let matched = 0;
+    try {
+      matched = await attachCitationLibraryMatches(resolutions);
+    } catch (err) {
+      ztoolkit.log("LLM: citation library matching failed", err);
+    }
+
+    const prompt = buildCitationInsightPrompt({
+      selection,
+      resolutions,
+      lang: getPanelLang(),
+      pageCitations: resolveReadingCardCitationMode(resolved.document),
+    });
+    if (!prompt) {
+      if (status) {
+        setStatus(status, labels.citationInsightPromptFailed, "error");
+      }
+      return;
+    }
+    inputBox.value = prompt;
+    sendBtn.click();
+    // Reported after the send so the count outlives the send path's own status
+    // write; the papers it refers to are already visible in the preview strip.
+    if (matched > 0 && status) {
+      setStatus(
+        status,
+        labels.citationInsightLibraryMatched(matched, resolutions.length),
+        "ready",
+      );
+    }
+  };
+
+  if (slashCitationInsightOption) {
+    slashCitationInsightOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void explainSelectedCitations();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Paper briefing — the opening card a reader panel writes by itself
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Built-in "generate paper briefing" action.
+   *
+   * Drives the normal send path exactly like the reading card, so the briefing
+   * lands as an ordinary assistant message: persisted with the conversation,
+   * savable as a note, and with clickable page anchors.
+   *
+   * `auto` marks the run the panel started by itself. An automatic run has no
+   * one watching it, so every failure is logged and dropped rather than turned
+   * into a status message the user never asked to see.
+   */
+  const generatePaperBriefing = async (options?: { auto?: boolean }) => {
+    if (!item) return;
+    const auto = options?.auto === true;
+    const labels = getPanelI18n();
+    const reportFailure = (
+      text: string,
+      level: Parameters<typeof setStatus>[2],
+    ) => {
+      if (auto || !status) return;
+      setStatus(status, text, level);
+    };
+    if (isPanelGenerating(body)) {
+      reportFailure(labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const resolved = resolveReadingCardDocument();
+    if (!resolved) {
+      reportFailure(labels.paperBriefingNoDocument, "warning");
+      return;
+    }
+    if (resolved.pinItem) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(resolved.pinItem);
+      if (paperRef) upsertPaperContext(paperRef, { silent: true });
+    }
+    // Loading the template can hit the filesystem on first use, so the status
+    // goes up before the await rather than after it. An automatic run says so
+    // too: an unexplained request is worse than one line of status text.
+    if (status) setStatus(status, labels.paperBriefingSending, "sending");
+
+    let builtinTemplate = "";
+    try {
+      builtinTemplate = (
+        await loadShortcutText(PAPER_BRIEFING_SHORTCUT_FILE)
+      ).trim();
+    } catch (err) {
+      ztoolkit.log("LLM: failed to load paper briefing template", err);
+    }
+    const prompt = buildPaperBriefingPrompt({
+      builtinTemplate,
+      lang: getPanelLang(),
+      pageCitations: resolveReadingCardCitationMode(resolved.document),
+      suggestedQuestions: isSuggestedQuestionsEnabled(),
+    });
+    if (!prompt) {
+      reportFailure(labels.paperBriefingPromptFailed, "error");
+      return;
+    }
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  if (slashPaperBriefingOption) {
+    slashPaperBriefingOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void generatePaperBriefing();
+    });
+  }
+
+  /** Messages on the conversation this panel is currently showing. */
+  const countPanelConversationMessages = (panelItem: Zotero.Item): number => {
+    const key = getConversationKey(panelItem);
+    return chatHistory.get(key)?.length ?? 0;
+  };
+
+  /**
+   * Whether the composer already holds something of the user's.
+   *
+   * Sending overwrites the input box and consumes every pinned context, so a
+   * restored draft or a passage the reader just pinned is enough to call the
+   * briefing off — it would otherwise destroy work the user can no longer get
+   * back. Drafts survive a panel rebuild, which is exactly the case where an
+   * automatic send would arrive unannounced.
+   */
+  const isComposerInUse = (panelItem: Zotero.Item): boolean => {
+    if (inputBox.value.trim()) return true;
+    const key = getConversationKey(panelItem);
+    if (key > 0 && getSelectedTextContextEntries(key).length) return true;
+    if ((selectedPaperContextCache.get(panelItem.id) || []).length) return true;
+    if ((selectedFileAttachmentCache.get(panelItem.id) || []).length)
+      return true;
+    if ((selectedImageCache.get(panelItem.id) || []).length) return true;
+    if (selectedAnnotationContextCache.get(panelItem.id)?.records.length)
+      return true;
+    return false;
+  };
+
+  /**
+   * Schedule the opening briefing, if this panel is the one that should write it.
+   *
+   * Two checks, not one. The first runs now and answers "is this a fresh
+   * reader panel on an empty conversation with a model to call"; the second
+   * runs after `AUTO_BRIEFING_TRIGGER_DELAY_MS` and answers "is the user still
+   * here". Splitting them is what keeps opening five PDFs in a row from
+   * sending five requests: only the tab still in front of the user when the
+   * delay expires gets one.
+   */
+  const scheduleAutoBriefing = () => {
+    if (!item || isGlobalPortalItem(item)) return;
+    const panelItem = item as Zotero.Item;
+    const conversationKey = getConversationKey(panelItem);
+    const gate = evaluateAutoBriefingGate({
+      panelKind: tabType,
+      mode: getAutoBriefingMode(),
+      alreadyAttempted: autoBriefingAttemptedItemIds.has(panelItem.id),
+      conversationLoaded: loadedConversationKeys.has(conversationKey),
+      messageCount: countPanelConversationMessages(panelItem),
+      composerDirty: isComposerInUse(panelItem),
+      generating: isPanelGenerating(body),
+      hasDocument: Boolean(resolveReaderDocument(panelItem)),
+      hasModel: Boolean(getSelectedModelInfo().currentModel.trim()),
+    });
+    if (!gate.trigger) {
+      // A library panel is not a failure to explain, it is the other half of
+      // the plugin; only reader panels log why they stayed quiet.
+      if (gate.reason !== "not-reader") {
+        ztoolkit.log(`LLM: auto briefing skipped (${gate.reason})`);
+      }
+      return;
+    }
+    // Claimed at schedule time, not at send time: a rebuilt panel must not
+    // queue a second timer while this one is still counting down.
+    autoBriefingAttemptedItemIds.add(panelItem.id);
+    getWindowTimeout(() => {
+      let activeDocumentItemId: number | null = null;
+      try {
+        activeDocumentItemId =
+          getActiveReaderDocumentAttachmentFromTabs()?.id ?? null;
+      } catch (err) {
+        ztoolkit.log("LLM: auto briefing could not read the active tab", err);
+      }
+      const stillWanted = shouldStillAutoBrief({
+        panelConnected: body.isConnected,
+        panelItemId: panelItem.id,
+        activeDocumentItemId,
+        conversationLoaded: loadedConversationKeys.has(conversationKey),
+        messageCount: countPanelConversationMessages(panelItem),
+        composerDirty: isComposerInUse(panelItem),
+        generating: isPanelGenerating(body),
+      });
+      if (!stillWanted) {
+        ztoolkit.log("LLM: auto briefing dropped before sending");
+        return;
+      }
+      void generatePaperBriefing({ auto: true });
+    }, AUTO_BRIEFING_TRIGGER_DELAY_MS);
+  };
 
   // ═══════════════════════════════════════════════════════════
   // Concept cards — a cross-paper glossary built from the reading
@@ -7784,6 +8464,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     closePromptMenu();
     closeHistoryMenu();
     closeReasoningMenu();
+    closeFigureMenu();
     updateModelButton();
     rebuildModelMenu();
     if (!modelMenu.childElementCount) {
@@ -7810,6 +8491,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     closePromptMenu();
     closeHistoryMenu();
     closeModelMenu();
+    closeFigureMenu();
     rebuildReasoningMenu();
     if (!reasoningMenu.childElementCount) {
       closeReasoningMenu();
@@ -7829,6 +8511,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     closeHistoryMenu();
     closeModelMenu();
     closeReasoningMenu();
+    closeFigureMenu();
     rebuildRetryModelMenu();
     if (!retryModelMenu.childElementCount) {
       closeRetryModelMenu();
@@ -7880,6 +8563,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       e.stopPropagation();
     });
     historyMenu.addEventListener("mousedown", (e: Event) => {
+      e.stopPropagation();
+    });
+  }
+
+  if (figureMenu) {
+    figureMenu.addEventListener("pointerdown", (e: Event) => {
+      e.stopPropagation();
+    });
+    figureMenu.addEventListener("mousedown", (e: Event) => {
       e.stopPropagation();
     });
   }
@@ -8108,6 +8800,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     );
   };
 
+  /**
+   * Ask one of the follow-up questions an answer proposed.
+   *
+   * Chips are rebuilt from message text on every render, so one under an old
+   * answer works exactly like one under the newest — asking it starts a fresh
+   * turn at the end of the conversation, which is what clicking a question in
+   * a chat log means. The composer is the send path, so a question is filled
+   * in and sent the same way a typed one is.
+   */
+  const askSuggestedQuestion = (question: string) => {
+    const text = String(question || "").trim();
+    if (!text) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    inputBox.value = text;
+    sendBtn.click();
+  };
+
   if (chatBox) {
     chatBox.addEventListener("keydown", (e: Event) => {
       const key = (e as KeyboardEvent).key;
@@ -8129,6 +8842,21 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         e.preventDefault();
         e.stopPropagation();
         openPageAnchorTarget(pageAnchorTarget);
+        return;
+      }
+
+      // Ask a follow-up question an assistant answer proposed
+      const suggestedQuestionTarget = (e.target as Element | null)?.closest(
+        ".llm-suggested-question",
+      ) as HTMLElement | null;
+      if (suggestedQuestionTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        askSuggestedQuestion(
+          suggestedQuestionTarget.dataset.question ||
+            suggestedQuestionTarget.textContent ||
+            "",
+        );
         return;
       }
 
@@ -8202,7 +8930,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         const history = chatHistory.get(key) || [];
         const msg = history[msgIndex];
         if (!msg?.text?.trim()) return;
-        void copyTextToClipboard(body, msg.text.trim()).then(() => {
+        // Copy what the bubble showed, not the follow-up question block the
+        // renderer hid; user messages are copied verbatim.
+        const copyText = (
+          msg.role === "assistant"
+            ? stripSuggestedQuestions(msg.text)
+            : msg.text
+        ).trim();
+        if (!copyText) return;
+        void copyTextToClipboard(body, copyText).then(() => {
           if (status) setStatus(status, getPanelI18n().copied, "ready");
         });
         return;
@@ -8345,6 +9081,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       const historyMenus = Array.from(
         doc.querySelectorAll("#llm-history-menu"),
       ) as HTMLDivElement[];
+      const figureMenus = Array.from(
+        doc.querySelectorAll("#llm-figure-menu"),
+      ) as HTMLDivElement[];
       for (const modelMenuEl of modelMenus) {
         if (!isFloatingMenuOpen(modelMenuEl)) continue;
         const panelRoot = modelMenuEl.closest("#llm-main");
@@ -8442,6 +9181,12 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           if (target && slashButtonEl?.contains(target)) continue;
           slashMenuEl.style.display = "none";
           slashButtonEl?.setAttribute("aria-expanded", "false");
+        }
+
+        for (const figureMenuEl of figureMenus) {
+          if (!isFloatingMenuOpen(figureMenuEl)) continue;
+          if (target && figureMenuEl.contains(target)) continue;
+          setFloatingMenuOpen(figureMenuEl, FIGURE_MENU_OPEN_CLASS, false);
         }
 
         for (const historyMenuEl of historyMenus) {
@@ -8960,4 +9705,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     updateLiveSettingsReadinessState(event);
     updateModelButton();
   });
+
+  // Last, so the briefing gate sees a fully wired panel: the conversation is
+  // already loaded by the reader bootstrap, and every handler the send path
+  // touches is registered above.
+  scheduleAutoBriefing();
 }

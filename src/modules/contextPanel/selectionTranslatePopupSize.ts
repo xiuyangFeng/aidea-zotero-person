@@ -49,6 +49,35 @@ export function resolveSelectionTranslateContentHeight(params: {
   });
 }
 
+/**
+ * Height ceiling for the bilingual source block.
+ *
+ * The source is reference material, not the answer, so it takes a fixed slice
+ * of the viewer and scrolls past it rather than pushing the translation out of
+ * sight. One complete line is the floor: a block too short to show its own
+ * first line would read as broken. The remaining space is still policed by
+ * `getSelectionTranslateAvailableResultHeight`, which measures the popup's
+ * chrome — this block included — before capping the result box, so a tall
+ * source cannot push the popup out of the reader.
+ */
+export function getSelectionTranslateSourceMaxHeight(params: {
+  viewerHeight: number;
+  minimumHeight: number;
+  ratio?: number;
+  cap?: number;
+}): number {
+  const minimumHeight = Math.max(0, params.minimumHeight);
+  const ratio = Number.isFinite(params.ratio) ? Number(params.ratio) : 0.22;
+  const cap = Number.isFinite(params.cap) ? Number(params.cap) : 180;
+  return Math.max(
+    minimumHeight,
+    Math.min(
+      Math.max(0, cap),
+      Math.round(Math.max(0, params.viewerHeight) * Math.max(0, ratio)),
+    ),
+  );
+}
+
 export function getSelectionTranslateMeasuredHeight(params: {
   boundingHeight: number;
   offsetHeight: number;

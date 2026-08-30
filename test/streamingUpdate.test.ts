@@ -322,6 +322,26 @@ describe("streamingUpdate", function () {
       );
     });
 
+    it("should hide the suggested-question marker while it streams in", function () {
+      // Rendering the marker and then removing it would reflow the whole
+      // answer above it, so a half-written marker never reaches the DOM.
+      const { assistantBubble } = buildChatBoxWithMessages();
+      const contentOf = () =>
+        assistantBubble.querySelector("[data-streaming-content]")!
+          .innerHTML as string;
+
+      patchStreamingBubble(assistantBubble, "The answer.\n\n===QUES");
+      assert.include(contentOf(), "The answer.");
+      assert.notInclude(contentOf(), "===");
+
+      patchStreamingBubble(
+        assistantBubble,
+        "The answer.\n\n===QUESTIONS===\nWhy this method?",
+      );
+      assert.include(contentOf(), "The answer.");
+      assert.notInclude(contentOf(), "Why this method?");
+    });
+
     it("should create a data-streaming-content element", function () {
       const { assistantBubble } = buildChatBoxWithMessages();
       patchStreamingBubble(assistantBubble, "Hello world");
@@ -440,6 +460,24 @@ describe("streamingUpdate", function () {
       finalizeStreamingBubble(assistantBubble);
 
       assert.isNull(assistantBubble.querySelector(".llm-streaming-skeleton"));
+    });
+
+    it("should drop the suggested-question block from the final render", function () {
+      // The chips are built by refreshChat from the stored text; the bubble
+      // only ever shows the body, so the marker must not survive finalize.
+      const { assistantBubble } = buildChatBoxWithMessages();
+      patchStreamingBubble(assistantBubble, "The answer.");
+
+      finalizeStreamingBubble(
+        assistantBubble,
+        "The answer.\n\n===QUESTIONS===\nWhy this method?\nHow far does it hold?",
+      );
+
+      const html = assistantBubble.querySelector("[data-streaming-content]")!
+        .innerHTML as string;
+      assert.include(html, "The answer.");
+      assert.notInclude(html, "QUESTIONS");
+      assert.notInclude(html, "Why this method?");
     });
   });
 

@@ -1058,6 +1058,12 @@
   margin-left: 0;
 }
 
+/* Opening paper briefing: same one-row layout as the citation style. */
+.llm-set-auto-briefing-field > .llm-set-hint {
+  flex-basis: 100%;
+  margin-left: 0;
+}
+
 .llm-set-oauth-env-update-field > .llm-set-label {
   font-weight: 700;
 }
@@ -4548,6 +4554,88 @@
   );
 }
 
+/* Follow-up question chips under an assistant answer.
+ * Styled after the composer's shortcut chips so both read as "one click sends
+ * this", but allowed to wrap: these are sentences, not one-word labels. */
+.llm-suggested-questions {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid
+    color-mix(
+      in srgb,
+      var(--llm-theme-border, var(--stroke-secondary)) 60%,
+      transparent
+    );
+}
+
+.llm-suggested-questions-title {
+  margin-bottom: 7px;
+  color: var(--fill-tertiary);
+  font-size: max(9px, calc(var(--llm-chat-font-size) - 3px));
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.llm-suggested-questions-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.llm-suggested-question {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--stroke-secondary) 85%, transparent);
+  border-radius: var(--llm-radius-pill);
+  background: color-mix(
+    in srgb,
+    var(--fill-quinary) 70%,
+    var(--material-background)
+  );
+  box-shadow: var(--llm-elevation-1);
+  color: var(--fill-primary);
+  font-size: max(9px, calc(var(--llm-chat-font-size) - 2px));
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.llm-suggested-question:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 42%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 10%,
+    var(--material-background)
+  );
+  color: var(--llm-theme-link, var(--llm-theme-accent, var(--color-accent)));
+  box-shadow: var(--llm-elevation-2);
+}
+
+.llm-suggested-question:active {
+  box-shadow: var(--llm-elevation-1);
+}
+
+.llm-suggested-question:focus-visible {
+  outline: 1px solid var(--llm-theme-accent, var(--color-accent));
+  outline-offset: 1px;
+}
+
 .llm-bubble.assistant blockquote {
   border-left: 3px solid var(--color-accent);
   margin: 8px 0;
@@ -5824,6 +5912,199 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 .llm-slash-group-label:not(:first-child) {
   margin-top: calc(3px * var(--llm-font-scale, 1));
   border-top: 1px solid var(--stroke-secondary);
+}
+
+/* ── Figure navigator ────────────────────────────────────────────────
+ * Floating list of the document's Figure/Table captions, opened from the
+ * slash menu. Inherits surface, border and z-index from .llm-response-menu;
+ * positionFloatingMenu() owns the height clamp and the scrollbar.
+ */
+.llm-figure-menu {
+  width: min(88vw, 380px);
+  max-width: min(90vw, 380px);
+  min-width: calc(220px * var(--llm-font-scale, 1));
+  padding: calc(6px * var(--llm-font-scale, 1));
+  border-radius: var(--llm-radius-md, 10px);
+  box-shadow: var(--llm-elevation-3, 0 8px 24px -4px rgba(0, 0, 0, 0.08));
+}
+
+.llm-figure-menu-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px 6px;
+  user-select: none;
+}
+
+.llm-figure-menu-title {
+  color: var(--fill-secondary);
+  font-size: var(--llm-fs-10);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.llm-figure-menu-count {
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-10);
+  white-space: nowrap;
+}
+
+.llm-figure-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.llm-figure-menu-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--stroke-secondary);
+  border-radius: var(--llm-radius-sm, 6px);
+  background: color-mix(
+    in srgb,
+    var(--material-background) 86%,
+    var(--fill-quinary)
+  );
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.llm-figure-menu-row:hover {
+  background: color-mix(
+    in srgb,
+    var(--fill-quinary) 60%,
+    var(--material-background)
+  );
+}
+
+.llm-figure-menu-row-main {
+  appearance: none;
+  -moz-appearance: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--fill-primary);
+  font: inherit;
+  padding: 7px 8px;
+  margin: 0;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.llm-figure-menu-row-main.is-static {
+  cursor: default;
+  opacity: 1;
+}
+
+.llm-figure-menu-row-main:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+  border-radius: var(--llm-radius-xs, 4px);
+}
+
+.llm-figure-row-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.llm-figure-row-kind {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--fill-tertiary);
+}
+
+.llm-figure-row-kind svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.llm-figure-row-label {
+  min-width: 0;
+  color: var(--fill-primary);
+  font-size: var(--llm-fs-11);
+  font-weight: 600;
+  line-height: 1.28;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.llm-figure-row-page {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-10);
+  line-height: 1.22;
+  white-space: nowrap;
+}
+
+.llm-figure-menu-row-main:not(.is-static):hover .llm-figure-row-page {
+  color: var(--color-accent);
+}
+
+.llm-figure-row-caption {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  min-width: 0;
+  color: var(--fill-secondary);
+  font-size: var(--llm-fs-10);
+  line-height: 1.32;
+  overflow: hidden;
+}
+
+.llm-figure-row-action {
+  appearance: none;
+  -moz-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  align-self: center;
+  border: 1px solid transparent;
+  border-radius: var(--llm-radius-sm, 6px);
+  background: transparent;
+  color: var(--fill-secondary);
+  font: inherit;
+  font-size: var(--llm-fs-10);
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 4px 8px;
+  margin: 0 5px 0 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.llm-figure-row-action:hover,
+.llm-figure-row-action:focus-visible {
+  color: var(--color-accent);
+  background: var(--color-accent10);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
 .llm-select-text-btn::before,
@@ -7454,14 +7735,6 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   gap: 2px;
 }
 
-/* ── Drop hint under the input path row (drag & drop PDF) ── */
-.llm-tr-drop-hint {
-  font-size: var(--llm-fs-10, 10px);
-  color: var(--fill-secondary, #888);
-  padding: 1px 2px 0 2px;
-  opacity: 0.85;
-}
-
 /* Highlight the PDF source block while dragging a file/item over the tab */
 .llm-tr-dragover {
   border-radius: 6px;
@@ -8571,7 +8844,8 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
     .llm-paper-picker-item:hover,
     .llm-model-option:hover,
     .llm-reasoning-option:hover,
-    .llm-history-menu-row:hover
+    .llm-history-menu-row:hover,
+    .llm-figure-menu-row:hover
   ) {
   background: color-mix(
     in srgb,
@@ -8583,6 +8857,7 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 .llm-panel[data-composer-theme-surface="true"]
   :is(
     .llm-history-menu-row,
+    .llm-figure-menu-row,
     .llm-file-context-item,
     .llm-paper-context-item,
     .llm-selected-context-detail-item
@@ -8861,6 +9136,36 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   color: var(--llm-theme-chat-fg, var(--fill-primary));
   background: var(--llm-theme-chip-bg, var(--fill-quinary));
   border-color: var(--llm-theme-border, var(--stroke-secondary));
+}
+
+.llm-selection-translate-wrap[data-composer-theme-surface="true"]
+  .llm-selection-translate-source {
+  color: var(--llm-theme-chat-muted, var(--fill-secondary));
+  border-left-color: var(--llm-theme-border, var(--stroke-secondary));
+}
+
+.llm-selection-translate-wrap .llm-selection-translate-bilingual-btn {
+  border-radius: var(--llm-radius-sm, 6px);
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.llm-selection-translate-wrap
+  .llm-selection-translate-bilingual-btn:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.llm-selection-translate-wrap[data-composer-theme-surface="true"]
+  .llm-selection-translate-bilingual-btn[aria-pressed="true"] {
+  color: var(--llm-theme-accent, var(--color-accent));
+  border-color: var(--llm-theme-border, var(--stroke-secondary));
+}
+
+.llm-selection-translate-wrap
+  .llm-selection-translate-bilingual-btn:focus-visible {
+  outline: 2px solid var(--llm-theme-accent, var(--color-accent));
+  outline-offset: 2px;
 }
 
 .llm-selection-translate-wrap[data-composer-theme-surface="true"]

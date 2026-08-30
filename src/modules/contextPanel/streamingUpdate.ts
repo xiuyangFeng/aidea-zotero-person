@@ -14,6 +14,10 @@ import {
   type TextBlock,
 } from "../../utils/markdown";
 import { sanitizeText } from "./textUtils";
+import {
+  stripStreamingSuggestedQuestions,
+  stripSuggestedQuestions,
+} from "../../utils/suggestedQuestions";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -229,7 +233,10 @@ export function patchStreamingBubble(
   if (!bubble.classList.contains("streaming") && !skeleton) return;
   bubble.classList.add("streaming");
 
-  const safeText = sanitizeText(text);
+  // The follow-up question block is stripped while it streams, not after, so
+  // the marker and its questions never flash into the bubble and reflow the
+  // answer above them when they are removed.
+  const safeText = stripStreamingSuggestedQuestions(sanitizeText(text));
   if (!safeText) return;
 
   // Remove skeleton on first real content
@@ -262,6 +269,10 @@ export function patchStreamingBubble(
  *   with the exact full `renderMarkdown` output and seeds the finalized
  *   render cache so the following `refreshChat` does not re-render this
  *   message's markdown/KaTeX.
+ *
+ * The cache is seeded with the *stripped* body, which is what `refreshChat`
+ * renders too; seeding it with the raw answer would miss on every message that
+ * proposes follow-up questions.
  */
 export function finalizeStreamingBubble(
   bubble: HTMLDivElement | null,
@@ -280,7 +291,7 @@ export function finalizeStreamingBubble(
   if (!contentEl) return;
   streamingRenderStates.delete(contentEl);
 
-  const safeText = sanitizeText(finalText);
+  const safeText = stripSuggestedQuestions(sanitizeText(finalText));
   if (!safeText) return;
   try {
     const html = renderMarkdown(safeText);

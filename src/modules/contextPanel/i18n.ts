@@ -73,6 +73,28 @@ export type PanelI18n = {
   readingCardPromptFailed: string;
   readingCardNoDocument: string;
   readingCardSending: string;
+  generatePaperBriefing: string;
+  paperBriefingPromptFailed: string;
+  paperBriefingNoDocument: string;
+  paperBriefingSending: string;
+  figureNavigator: string;
+  figureNavigatorTitle: string;
+  figureNavigatorLoading: string;
+  figureNavigatorNoDocument: string;
+  figureNavigatorEmpty: string;
+  figureNavigatorCount: (count: number) => string;
+  figureNavigatorExplain: string;
+  figureNavigatorExplainAria: (label: string) => string;
+  figureNavigatorJumpAria: (label: string, page: number) => string;
+  figureNavigatorNoPage: string;
+  explainSelectedCitations: string;
+  citationInsightNoSelection: string;
+  citationInsightNoMarkers: string;
+  citationInsightNoDocument: string;
+  citationInsightScanning: string;
+  citationInsightPromptFailed: string;
+  citationInsightLibraryMatched: (matched: number, total: number) => string;
+  suggestedQuestionsTitle: string;
   extractConceptCards: string;
   recordConceptCard: string;
   exportGlossary: string;
@@ -274,6 +296,8 @@ export type PanelI18n = {
   selectionTranslateFailed: string;
   selectionTranslateColdStartStatus: string;
   selectionTranslateCacheReady: string;
+  selectionTranslateShowSource: string;
+  selectionTranslateHideSource: string;
   addToNote: string;
   addingToNote: string;
   addedToNote: string;
@@ -4029,6 +4053,41 @@ export function getPanelI18n(): PanelI18n {
       readingCardNoDocument:
         "No readable PDF or EPUB for this item. Open one or select an item that has one.",
       readingCardSending: "Generating the reading card...",
+      generatePaperBriefing: "Generate paper briefing",
+      paperBriefingPromptFailed: "Could not load the paper briefing template",
+      paperBriefingNoDocument:
+        "No readable PDF or EPUB for this item. Open one or select an item that has one.",
+      paperBriefingSending: "Generating the paper briefing...",
+      figureNavigator: "Figure navigator",
+      figureNavigatorTitle: "Figures & tables",
+      figureNavigatorLoading: "Reading the figures and tables...",
+      figureNavigatorNoDocument:
+        "No readable PDF or EPUB for this item. Open one or select an item that has one.",
+      figureNavigatorEmpty:
+        "No figure or table caption could be read from this document",
+      figureNavigatorCount: (count) =>
+        `${count} figure${count === 1 ? "" : "s"} and table${
+          count === 1 ? "" : "s"
+        }`,
+      figureNavigatorExplain: "Explain",
+      figureNavigatorExplainAria: (label) => `Explain ${label}`,
+      figureNavigatorJumpAria: (label, page) => `Open ${label} on page ${page}`,
+      figureNavigatorNoPage: "No page",
+      explainSelectedCitations: "Explain selected citations",
+      citationInsightNoSelection:
+        "Select text containing a citation marker in the reader first",
+      citationInsightNoMarkers:
+        "No citation marker such as [12] or (Smith et al., 2024) in the selected text",
+      citationInsightNoDocument:
+        "No readable PDF or EPUB for this item. Open one or select an item that has one.",
+      citationInsightScanning: "Looking up the cited references...",
+      citationInsightPromptFailed:
+        "Could not build the citation insight prompt",
+      citationInsightLibraryMatched: (matched, total) =>
+        `${matched} of ${total} citation${
+          total === 1 ? "" : "s"
+        } are in your library — added as supplemental papers, so you can keep asking about them`,
+      suggestedQuestionsTitle: "Ask next:",
       extractConceptCards: "Extract concept cards",
       recordConceptCard: "Record a concept...",
       exportGlossary: "Export glossary",
@@ -4278,6 +4337,8 @@ export function getPanelI18n(): PanelI18n {
       selectionTranslateColdStartStatus:
         "Selection translation cold starting...",
       selectionTranslateCacheReady: "Selection translation cache ready",
+      selectionTranslateShowSource: "Show the original text",
+      selectionTranslateHideSource: "Hide the original text",
       addToNote: "Add to note",
       addingToNote: "Adding...",
       addedToNote: "Added",
@@ -4404,6 +4465,34 @@ export function getPanelI18n(): PanelI18n {
     readingCardNoDocument:
       "该条目没有可读取的 PDF 或 EPUB，请先打开或选中带附件的条目",
     readingCardSending: "正在生成精读卡片……",
+    generatePaperBriefing: "生成论文速览",
+    paperBriefingPromptFailed: "无法加载论文速览模板",
+    paperBriefingNoDocument:
+      "该条目没有可读取的 PDF 或 EPUB，请先打开或选中带附件的条目",
+    paperBriefingSending: "正在生成论文速览……",
+    figureNavigator: "图表导读",
+    figureNavigatorTitle: "图表清单",
+    figureNavigatorLoading: "正在读取图表……",
+    figureNavigatorNoDocument:
+      "该条目没有可读取的 PDF 或 EPUB，请先打开或选中带附件的条目",
+    figureNavigatorEmpty: "没能从这篇文档里解析出图表标题",
+    figureNavigatorCount: (count) => `共 ${count} 个图表`,
+    figureNavigatorExplain: "解读",
+    figureNavigatorExplainAria: (label) => `解读 ${label}`,
+    figureNavigatorJumpAria: (label, page) =>
+      `跳转到 ${label}（第 ${page} 页）`,
+    figureNavigatorNoPage: "无页码",
+    explainSelectedCitations: "解读选中引用",
+    citationInsightNoSelection: "请先在阅读器中选中包含引用标记的文本",
+    citationInsightNoMarkers:
+      "选中的文本里没有找到 [12] 或 (Smith et al., 2024) 这样的引用标记",
+    citationInsightNoDocument:
+      "该条目没有可读取的 PDF 或 EPUB，请先打开或选中带附件的条目",
+    citationInsightScanning: "正在定位被引文献……",
+    citationInsightPromptFailed: "无法生成引文解读提示词",
+    citationInsightLibraryMatched: (matched, total) =>
+      `${total} 条引用中 ${matched} 条在你的文库中，已挂为补充文献，可继续追问`,
+    suggestedQuestionsTitle: "继续追问：",
     extractConceptCards: "提取概念卡",
     recordConceptCard: "记录概念……",
     exportGlossary: "导出术语表",
@@ -4632,6 +4721,8 @@ export function getPanelI18n(): PanelI18n {
     selectionTranslateFailed: "翻译失败",
     selectionTranslateColdStartStatus: "划词翻译冷启动中...",
     selectionTranslateCacheReady: "划词翻译缓存已就绪",
+    selectionTranslateShowSource: "显示原文对照",
+    selectionTranslateHideSource: "隐藏原文对照",
     addToNote: "添加到笔记",
     addingToNote: "正在添加...",
     addedToNote: "已添加",
@@ -4736,7 +4827,6 @@ export function refreshTranslateTabI18n(doc: Document): void {
 
   // Buttons
   setText("llm-tr-pick-file", i18n.trSelectLocalPdf);
-  setText("llm-tr-drop-hint", i18n.trPdfDropHint);
   setText("llm-tr-browse-dir", i18n.trBrowsePath);
   setText("llm-tr-install-env", `⚙ ${i18n.trInstallEnv}`);
   setText("llm-tr-start", `▶ ${i18n.trStartTranslation}`);

@@ -47,6 +47,8 @@ declare namespace _ZoteroTypes {
       "selectionTranslate.auto": boolean;
       "selectionTranslate.showCopyButton": boolean;
       "selectionTranslate.showAddToNoteButton": boolean;
+      "selectionTranslate.bilingual": boolean;
+      "selectionTranslate.termProtection": boolean;
       "selectionTranslate.model": string;
       "selectionTranslate.provider": string;
       "selectionTranslate.sourceLang": string;
@@ -70,6 +72,8 @@ declare namespace _ZoteroTypes {
       "readingCard.researchFocus": string;
       "conceptCards.autoRecall": boolean;
       "writingExport.citationStyle": string;
+      "autoBriefing.mode": string;
+      "suggestedQuestions.enabled": boolean;
       "translate.sourceLang": string;
       "translate.targetLang": string;
       "translate.outputMono": boolean;

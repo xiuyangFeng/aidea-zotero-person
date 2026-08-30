@@ -110,6 +110,15 @@ export const READING_CARD_SHORTCUT_FILE = "reading-card.txt";
  */
 export const CONCEPT_CARDS_SHORTCUT_FILE = "concept-cards.txt";
 
+/**
+ * Built-in template behind the opening paper briefing.
+ *
+ * Kept out of BUILTIN_SHORTCUT_FILES for the same reason as the reading card,
+ * and for one more: the briefing is mostly reached automatically when a reader
+ * panel opens on an empty conversation, so it is not a button the user picks.
+ */
+export const PAPER_BRIEFING_SHORTCUT_FILE = "paper-briefing.txt";
+
 export const BUILTIN_SHORTCUT_FILES = [
   { id: "translate", label: "Translate", file: "translate.txt" },
   { id: "summarize", label: "Summarize", file: "summarize.txt" },

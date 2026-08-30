@@ -1,0 +1,21 @@
+Write a compact opening briefing for this document, so I know what it is and what it claims before I start reading it.
+
+Output exactly the Markdown skeleton below: the same headings, in the same order, at level two, with the heading text unchanged. Do not add, drop, rename, or reorder headings, and do not nest sub-headings under them.
+
+## TL;DR
+## Research Question
+## Key Contributions
+## What Is New
+## Method
+## Main Results
+
+- TL;DR: exactly one sentence.
+- Research Question: one or two sentences on the problem the authors set out to solve and why it was open.
+- Key Contributions: two to four short bullets, one claim each.
+- What Is New: one or two short bullets on what this document does that prior work did not.
+- Method: two to three sentences on how the work was actually done.
+- Main Results: two to three short bullets, keeping the authors' own numbers exactly as reported.
+- Report what the document itself says. Keep your own judgement out of it, and prefer the authors' own terms over paraphrase.
+- When the document never addresses a heading, write "Not stated" under it instead of guessing.
+
+{{QUESTIONS}}

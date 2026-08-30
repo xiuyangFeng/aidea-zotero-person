@@ -70,9 +70,15 @@ import {
 } from "./librarySelection";
 import { getPanelI18n } from "./i18n";
 import {
+  isSelectionTranslateBilingualEnabled,
   isSelectionTranslateEnabled,
+  setSelectionTranslateBilingualEnabled,
   translateSelectedTextForReader,
 } from "./selectionTranslate";
+import {
+  resolveSelectionBilingualViewState,
+  toggleSelectionBilingual,
+} from "./selectionTranslateBilingual";
 import { EPUB_CONTENT_TYPE, getReaderDocumentKind } from "./documentContext";
 import { appendSelectionTranslationToNote } from "./notes";
 import {
@@ -87,6 +93,7 @@ import {
 import {
   getSelectionTranslateMeasuredHeight,
   getSelectionTranslateSingleLineHeight,
+  getSelectionTranslateSourceMaxHeight,
   resolveSelectionTranslateContentHeight,
   scheduleSelectionTranslateLayout,
 } from "./selectionTranslatePopupSize";
@@ -525,6 +532,8 @@ function layoutSelectionTranslatePopup(params: {
   popup: HTMLElement | null;
   wrap: HTMLElement;
   resultBox: HTMLElement;
+  /** Bilingual source block, when the popup is showing one. */
+  sourceBox?: HTMLElement | null;
   selectionRect: SelectionPopupRect | null;
   preferredWidth: number;
   preferredHeight: number;
@@ -536,6 +545,7 @@ function layoutSelectionTranslatePopup(params: {
     popup,
     wrap,
     resultBox,
+    sourceBox = null,
     selectionRect,
     preferredWidth,
     preferredHeight,
@@ -557,6 +567,14 @@ function layoutSelectionTranslatePopup(params: {
 
   wrap.style.width = `${width}px`;
   wrap.style.maxWidth = `${availableWidth}px`;
+  if (sourceBox) {
+    // The source scrolls inside its own ceiling; what is left of the viewport
+    // is measured as popup chrome below, so the result box shrinks to match.
+    sourceBox.style.maxHeight = `${getSelectionTranslateSourceMaxHeight({
+      viewerHeight: viewport.height,
+      minimumHeight,
+    })}px`;
+  }
   resultBox.style.width = "100%";
   resultBox.style.fontSize = `${typography.selectionFontSize}px`;
   resultBox.style.lineHeight = String(typography.selectionLineHeight);
@@ -1140,6 +1158,10 @@ export function registerReaderSelectionTracking() {
             copy: i18n.copy,
             copied: i18n.copied,
           };
+          const bilingualText = {
+            showSource: i18n.selectionTranslateShowSource,
+            hideSource: i18n.selectionTranslateHideSource,
+          };
           const noteText = {
             addToNote: i18n.addToNote,
             addingToNote: i18n.addingToNote,
@@ -1184,6 +1206,142 @@ export function registerReaderSelectionTracking() {
             "color:inherit",
           ].join(";");
           applyCurrentThemeToRoot(wrap);
+
+          // Bilingual mode is a display choice, not a translation choice: the
+          // source is already in hand, so the toggle only shows or hides it and
+          // never costs a second request.
+          const createPopupElement = <T extends HTMLElement>(
+            tag: string,
+            className: string,
+          ): T => {
+            const element = event.doc.createElementNS(
+              "http://www.w3.org/1999/xhtml",
+              tag,
+            ) as unknown as T;
+            element.className = className;
+            return element;
+          };
+          const stopPopupEventBubbling = (
+            target: HTMLElement,
+            eventNames: string[],
+          ) => {
+            for (const eventName of eventNames) {
+              target.addEventListener(eventName, (e: Event) => {
+                e.stopPropagation();
+              });
+            }
+          };
+
+          let bilingualEnabled = isSelectionTranslateBilingualEnabled();
+          let bilingualSourceText = selectedText;
+
+          const toolbar = createPopupElement<HTMLDivElement>(
+            "div",
+            "llm-selection-translate-toolbar",
+          );
+          toolbar.style.cssText = [
+            "display:flex",
+            "width:100%",
+            "align-items:center",
+            "justify-content:flex-end",
+            "gap:6px",
+            "margin:0 0 -4px 0",
+            "box-sizing:border-box",
+          ].join(";");
+          stopPopupEventBubbling(toolbar, [
+            "pointerdown",
+            "pointerup",
+            "mousedown",
+            "mouseup",
+            "click",
+          ]);
+          const bilingualBtn = createPopupElement<HTMLButtonElement>(
+            "button",
+            "llm-selection-translate-bilingual-btn",
+          );
+          bilingualBtn.type = "button";
+          // A language pair reads at any size and needs no icon asset in the
+          // reader document, which cannot load the plugin's own chrome.
+          bilingualBtn.textContent = "A文";
+          bilingualBtn.style.cssText = [
+            "margin:0",
+            "padding:1px 6px",
+            "box-sizing:border-box",
+            "border:1px solid transparent",
+            "border-radius:6px",
+            "background:transparent",
+            "color:inherit",
+            "font-size:11px",
+            "line-height:1.5",
+            "white-space:nowrap",
+            "cursor:pointer",
+          ].join(";");
+
+          const sourceBox = createPopupElement<HTMLDivElement>(
+            "div",
+            "llm-selection-translate-source",
+          );
+          sourceBox.style.cssText = [
+            "display:none",
+            "width:100%",
+            "max-width:calc(100vw - 20px)",
+            "overflow:auto",
+            "box-sizing:border-box",
+            "padding:4px 10px",
+            "border-left:2px solid var(--llm-theme-border, rgba(130,130,130,0.45))",
+            "border-radius:0 6px 6px 0",
+            "background:transparent",
+            "color:var(--llm-theme-chat-muted, inherit)",
+            "opacity:0.74",
+            `font-size:${Math.max(10, typography.selectionFontSize - 1)}px`,
+            `line-height:${typography.selectionLineHeight}`,
+            "white-space:pre-wrap",
+            "overflow-wrap:anywhere",
+            "cursor:text",
+            "user-select:text",
+            "-moz-user-select:text",
+          ].join(";");
+          stopPopupEventBubbling(sourceBox, [
+            "pointerdown",
+            "pointerup",
+            "mousedown",
+            "mouseup",
+            "click",
+            "selectstart",
+            "dragstart",
+          ]);
+          const applyBilingualState = (preservePosition: boolean = true) => {
+            const view = resolveSelectionBilingualViewState({
+              bilingual: bilingualEnabled,
+              sourceText: bilingualSourceText,
+              labels: bilingualText,
+            });
+            sourceBox.textContent = view.sourceText;
+            sourceBox.style.display = view.showSourceBlock ? "block" : "none";
+            bilingualBtn.title = view.toggleLabel;
+            bilingualBtn.setAttribute("aria-label", view.toggleLabel);
+            bilingualBtn.setAttribute(
+              "aria-pressed",
+              view.togglePressed ? "true" : "false",
+            );
+            bilingualBtn.style.opacity = view.togglePressed ? "1" : "0.55";
+            bilingualBtn.style.borderColor = view.togglePressed
+              ? "var(--llm-theme-border, rgba(130,130,130,0.38))"
+              : "transparent";
+            bilingualBtn.style.background = view.togglePressed
+              ? "var(--llm-theme-chip-bg, rgba(127,127,127,0.10))"
+              : "transparent";
+            selectionTranslateContentChanged?.(preservePosition);
+          };
+          bilingualBtn.addEventListener("click", (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+            bilingualEnabled = setSelectionTranslateBilingualEnabled(
+              toggleSelectionBilingual(bilingualEnabled),
+            );
+            applyBilingualState();
+          });
+          toolbar.appendChild(bilingualBtn);
 
           const resultBox = event.doc.createElementNS(
             "http://www.w3.org/1999/xhtml",
@@ -1384,7 +1542,7 @@ export function registerReaderSelectionTracking() {
           );
           if (showCopyButton) actionRow.appendChild(copyBtn);
           if (showAddToNoteButton) actionRow.appendChild(addToNoteBtn);
-          wrap.append(resultBox, actionRow);
+          wrap.append(toolbar, sourceBox, resultBox, actionRow);
           event.append(wrap);
           if (!popupSentinelEl) popupSentinelEl = wrap;
           stripPopupRowChrome(wrap.parentElement as HTMLElement | null);
@@ -1405,6 +1563,7 @@ export function registerReaderSelectionTracking() {
                 popup: selectionPopup,
                 wrap,
                 resultBox,
+                sourceBox,
                 selectionRect,
                 preferredWidth: currentPopupWidth,
                 preferredHeight: currentPopupHeight,
@@ -1431,6 +1590,7 @@ export function registerReaderSelectionTracking() {
                 popup: selectionPopup,
                 wrap,
                 resultBox,
+                sourceBox,
                 selectionRect,
                 preferredWidth: currentPopupWidth,
                 preferredHeight: currentPopupHeight,
@@ -1455,6 +1615,7 @@ export function registerReaderSelectionTracking() {
                 popup: selectionPopup,
                 wrap,
                 resultBox,
+                sourceBox,
                 selectionRect,
                 preferredWidth: currentPopupWidth,
                 preferredHeight: currentPopupHeight,
@@ -1718,6 +1879,13 @@ export function registerReaderSelectionTracking() {
             resultBox.style.lineHeight = String(
               nextTypography.selectionLineHeight,
             );
+            sourceBox.style.fontSize = `${Math.max(
+              10,
+              nextTypography.selectionFontSize - 1,
+            )}px`;
+            sourceBox.style.lineHeight = String(
+              nextTypography.selectionLineHeight,
+            );
             copyBtn.style.fontSize = `${nextTypography.selectionFontSize}px`;
             copyBtn.style.lineHeight = "1.25";
             addToNoteBtn.style.fontSize = `${nextTypography.selectionFontSize}px`;
@@ -1765,6 +1933,7 @@ export function registerReaderSelectionTracking() {
             event,
             removeSelectionTypographyListeners,
           );
+          applyBilingualState(false);
           selectionTranslateContentChanged();
 
           let latestSelectionTranslation: {
@@ -1835,6 +2004,12 @@ export function registerReaderSelectionTracking() {
               const effectiveSelectedText =
                 normalizeSelectedText(selectedText) ||
                 resolveSelectedTextForPopupAction();
+              if (effectiveSelectedText !== bilingualSourceText) {
+                // The popup may have opened before the reader settled on a
+                // selection; the source block follows whatever was translated.
+                bilingualSourceText = effectiveSelectedText;
+                applyBilingualState();
+              }
               if (!item || !effectiveSelectedText) {
                 resultBox.textContent = text.failed;
                 selectionTranslateContentChanged?.();

@@ -34,7 +34,11 @@ export type PanelDomRefs = {
   slashLibraryOption: HTMLButtonElement | null;
   slashAnnotationsOption: HTMLButtonElement | null;
   slashAnnotationSummaryOption: HTMLButtonElement | null;
+  slashPaperBriefingOption: HTMLButtonElement | null;
   slashReadingCardOption: HTMLButtonElement | null;
+  slashFigureNavigatorOption: HTMLButtonElement | null;
+  figureMenu: HTMLDivElement | null;
+  slashCitationInsightOption: HTMLButtonElement | null;
   slashConceptExtractOption: HTMLButtonElement | null;
   slashConceptRecordOption: HTMLButtonElement | null;
   slashGlossaryExportOption: HTMLButtonElement | null;
@@ -174,8 +178,18 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     slashAnnotationSummaryOption: body.querySelector(
       "#llm-slash-annotation-summary-option",
     ) as HTMLButtonElement | null,
+    slashPaperBriefingOption: body.querySelector(
+      "#llm-slash-paper-briefing-option",
+    ) as HTMLButtonElement | null,
     slashReadingCardOption: body.querySelector(
       "#llm-slash-reading-card-option",
+    ) as HTMLButtonElement | null,
+    slashFigureNavigatorOption: body.querySelector(
+      "#llm-slash-figure-navigator-option",
+    ) as HTMLButtonElement | null,
+    figureMenu: body.querySelector("#llm-figure-menu") as HTMLDivElement | null,
+    slashCitationInsightOption: body.querySelector(
+      "#llm-slash-citation-insight-option",
     ) as HTMLButtonElement | null,
     slashConceptExtractOption: body.querySelector(
       "#llm-slash-concept-extract-option",

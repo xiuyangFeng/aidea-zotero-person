@@ -129,6 +129,11 @@ import {
   createPageAnchorHrefResolver,
   type PageAnchorScopeOptions,
 } from "./pageAnchorTargets";
+import {
+  isSuggestedQuestionsEnabled,
+  splitSuggestedQuestions,
+  stripSuggestedQuestions,
+} from "../../utils/suggestedQuestions";
 import { formatPaperCitationLabel } from "./paperAttribution";
 import { resolveContextSourceItem } from "./contextResolution";
 import { buildChatHistoryNotePayload } from "./notes";
@@ -2290,7 +2295,12 @@ function buildHistoryMessageForLLM(message: Message): ChatMessage {
   if (message.role === "assistant") {
     return {
       role: "assistant",
-      content: stripGeneratedImageMarkdown(message.text),
+      // The follow-up question block is panel furniture, like generated-image
+      // markdown: replaying it would teach the model to append one to every
+      // later answer, whether or not the prompt asked for it.
+      content: stripSuggestedQuestions(
+        stripGeneratedImageMarkdown(message.text),
+      ),
     };
   }
   const { question } = reconstructRetryPayload(message);
@@ -3424,6 +3434,42 @@ export async function sendQuestion(
 }
 
 /**
+ * Build the follow-up question chips shown under an assistant answer.
+ *
+ * Plain buttons carrying their question in a data attribute: the panel's
+ * delegated chat-box click handler reads it and drives the ordinary send path,
+ * so a chip from a conversation reloaded weeks later works exactly like one
+ * from the answer that just arrived. Nothing here knows how to send.
+ */
+function buildSuggestedQuestionsRow(
+  doc: Document,
+  questions: readonly string[],
+  title: string,
+): HTMLDivElement {
+  const row = doc.createElement("div") as HTMLDivElement;
+  row.className = "llm-suggested-questions";
+
+  const heading = doc.createElement("div") as HTMLDivElement;
+  heading.className = "llm-suggested-questions-title";
+  heading.textContent = title;
+  row.appendChild(heading);
+
+  const chips = doc.createElement("div") as HTMLDivElement;
+  chips.className = "llm-suggested-questions-list";
+  for (const question of questions) {
+    const chip = doc.createElement("button") as HTMLButtonElement;
+    chip.type = "button";
+    chip.className = "llm-suggested-question";
+    chip.textContent = question;
+    chip.title = question;
+    chip.dataset.question = question;
+    chips.appendChild(chip);
+  }
+  row.appendChild(chips);
+  return row;
+}
+
+/**
  * Stable cache key for a persisted assistant message's rendered markdown.
  * Returns `null` for messages without a database id (cache bypassed).
  */
@@ -4186,8 +4232,16 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     } else {
       const hasModelName = Boolean(msg.modelName?.trim());
       const hasAnswerText = Boolean(msg.text);
+      // Follow-up questions are derived from the stored text on every render:
+      // the message keeps the model's answer verbatim, the bubble shows the
+      // body without the block, and the chips are rebuilt from it. Stripping
+      // happens whether or not the chips are shown, so turning the feature off
+      // never exposes the raw marker in a conversation recorded with it on.
+      const suggestedQuestions = splitSuggestedQuestions(
+        sanitizeText(msg.text || ""),
+      );
       if (hasAnswerText) {
-        const safeText = sanitizeText(msg.text);
+        const safeText = suggestedQuestions.body;
         const renderAssistantMarkdown = (target: HTMLDivElement) => {
           try {
             // Rendered markdown is cached per message id, so rebuilding the
@@ -4250,7 +4304,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           // just that portion (with KaTeX math properly handled).
           // Otherwise fall back to the full raw markdown source.
           const selectedText = getSelectedTextWithinBubble(doc, bubble);
-          const fullMarkdown = sanitizeText(msg.text || "").trim();
+          const fullMarkdown = suggestedQuestions.body.trim();
           const contentText = selectedText || fullMarkdown;
           if (!contentText) return;
           setResponseMenuTarget({
@@ -4277,6 +4331,23 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
         } else {
           bubble.textContent = i18n.noResponse;
         }
+      }
+
+      // Chips go up once the answer has settled: mid-stream the block is not
+      // complete yet, and a set of questions that grows a chip at a time would
+      // push the composer around while the user is still reading.
+      if (
+        !msg.streaming &&
+        suggestedQuestions.questions.length &&
+        isSuggestedQuestionsEnabled()
+      ) {
+        bubble.appendChild(
+          buildSuggestedQuestionsRow(
+            doc,
+            suggestedQuestions.questions,
+            i18n.suggestedQuestionsTitle,
+          ),
+        );
       }
 
       if (hasModelName) {

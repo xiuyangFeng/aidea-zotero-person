@@ -20,6 +20,7 @@ import {
 } from "./prefHelpers";
 import type { Message } from "./types";
 import { getPanelLang, type PanelLang } from "./i18n";
+import { stripSuggestedQuestions } from "../../utils/suggestedQuestions";
 
 /** Extra Zotero tags a caller wants on the note it is about to write. */
 export type NoteWriteOptions = {
@@ -135,7 +136,12 @@ export function buildChatHistoryNotePayload(
   const textLines: string[] = [];
   const htmlBlocks: string[] = [];
   for (const msg of messages) {
-    const text = sanitizeText(msg.text || "").trim();
+    // A note is the answer as it was read, so the follow-up question block
+    // goes the same way it does in the bubble. User text is never touched.
+    const sanitized = sanitizeText(msg.text || "");
+    const text = (
+      msg.role === "assistant" ? stripSuggestedQuestions(sanitized) : sanitized
+    ).trim();
     const screenshotImages = normalizeScreenshotImagesForNote(
       msg.screenshotImages,
     );
@@ -475,7 +481,7 @@ export async function createNoteFromAssistantText(
   // span trees and sanitised classless wrappers were mostly dropped by
   // ProseMirror.)
   const html = buildAssistantNoteHtml(
-    contentText,
+    stripSuggestedQuestions(contentText),
     modelName,
     createPageAnchorHrefResolver({ item }),
   );

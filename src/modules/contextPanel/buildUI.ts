@@ -527,6 +527,16 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       textContent: i18n.summarizeMyAnnotations,
     },
   );
+  const slashPaperBriefingBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-paper-briefing-option",
+      type: "button",
+      textContent: i18n.generatePaperBriefing,
+    },
+  );
   const slashReadingCardBtn = createElement(
     doc,
     "button",
@@ -535,6 +545,26 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       id: "llm-slash-reading-card-option",
       type: "button",
       textContent: i18n.generateReadingCard,
+    },
+  );
+  const slashFigureNavigatorBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-figure-navigator-option",
+      type: "button",
+      textContent: i18n.figureNavigator,
+    },
+  );
+  const slashCitationInsightBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-citation-insight-option",
+      type: "button",
+      textContent: i18n.explainSelectedCitations,
     },
   );
   const slashConceptExtractBtn = createElement(
@@ -586,8 +616,11 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     slashLibraryBtn,
     slashAnnotationsBtn,
     makeSlashGroupLabel(i18n.slashGroupReading),
+    slashPaperBriefingBtn,
     slashAnnotationSummaryBtn,
     slashReadingCardBtn,
+    slashFigureNavigatorBtn,
+    slashCitationInsightBtn,
     slashConceptExtractBtn,
     slashConceptRecordBtn,
     makeSlashGroupLabel(i18n.slashGroupExport),
@@ -595,6 +628,19 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     slashWritingDraftBtn,
   );
   container.appendChild(slashMenu);
+
+  // Figure navigator — the document's Figure/Table captions as a jump list.
+  // Built empty and filled on open, like the history and model menus.
+  const figureMenu = createElement(
+    doc,
+    "div",
+    "llm-response-menu llm-figure-menu",
+    {
+      id: "llm-figure-menu",
+    },
+  );
+  figureMenu.style.display = "none";
+  container.appendChild(figureMenu);
 
   // Retry model menu (opened from latest assistant retry action)
   const retryModelMenu = createElement(doc, "div", "llm-model-menu", {

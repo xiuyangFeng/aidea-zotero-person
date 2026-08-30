@@ -1,3 +1,6 @@
+import { fnv1aHex } from "./hash";
+import { NO_TERM_PROTECTION_FINGERPRINT } from "./selectionTermProtection";
+
 export type SelectionTranslateColdStartCache = {
   itemId: number;
   libraryID: number;
@@ -221,5 +224,116 @@ export async function clearSelectionTranslateColdStartCache(): Promise<number> {
   )) as Array<{ count?: unknown }> | undefined;
   const count = normalizeNonNegativeInt(rows?.[0]?.count);
   await Zotero.DB.queryAsync(`DELETE FROM ${SELECTION_TRANSLATE_CACHE_TABLE}`);
+  clearSelectionTranslateResultCache();
   return count;
+}
+
+// ===========================================================================
+// Translated-selection memo
+//
+// The cold-start cache above is per document; this one is per selection. It is
+// deliberately in memory only: a translation is cheap to redo across sessions
+// and expensive to get wrong, and the point of the memo is the reader who
+// re-selects the same paragraph a minute later, not the reader who comes back
+// tomorrow.
+// ===========================================================================
+
+/** Entries kept before the oldest is evicted. */
+const SELECTION_TRANSLATE_RESULT_CACHE_LIMIT = 32;
+/** Selected text is hashed rather than keyed whole; this bounds the input. */
+const SELECTION_TRANSLATE_RESULT_KEY_TEXT_LIMIT = 12000;
+
+export type SelectionTranslateResultCacheEntry = {
+  translation: string;
+  model: string;
+  provider?: string;
+};
+
+export type BuildSelectionTranslateResultCacheKeyParams = {
+  itemId: number;
+  sourceLang: string;
+  targetLang: string;
+  model: string;
+  provider?: string;
+  contextMode: string;
+  /** The context block the prompt carries, so a rebuilt cold start invalidates. */
+  contextText?: string;
+  selectedText: string;
+  /**
+   * `buildTermProtectionFingerprint` of the injected terms. Folding it in is
+   * what stops a translation made under a term rule from being replayed for a
+   * request that carries none — the two prompts differ, so their answers must
+   * not share a key.
+   */
+  termFingerprint?: string;
+};
+
+/**
+ * Key one translated selection.
+ *
+ * Every input that can change the answer is in the key: the document, both
+ * languages, the model that will write it, the context block it will read, the
+ * text itself and the terms the prompt protects. Long fields are hashed so the
+ * key stays short whatever the reader selected.
+ */
+export function buildSelectionTranslateResultCacheKey(
+  params: BuildSelectionTranslateResultCacheKeyParams,
+): string {
+  const selectedText = String(params.selectedText || "").slice(
+    0,
+    SELECTION_TRANSLATE_RESULT_KEY_TEXT_LIMIT,
+  );
+  const contextText = String(params.contextText || "").slice(
+    0,
+    SELECTION_TRANSLATE_RESULT_KEY_TEXT_LIMIT,
+  );
+  return [
+    SELECTION_TRANSLATE_CACHE_SCHEMA_VERSION,
+    normalizeNonNegativeInt(params.itemId),
+    normalizeText(params.sourceLang, 32),
+    normalizeText(params.targetLang, 32),
+    normalizeText(params.model, 256),
+    normalizeText(params.provider, 128),
+    normalizeText(params.contextMode, 64),
+    normalizeText(params.termFingerprint, 64) || NO_TERM_PROTECTION_FINGERPRINT,
+    `c${contextText.length}-${fnv1aHex(contextText)}`,
+    `s${selectedText.length}-${fnv1aHex(selectedText)}`,
+  ].join("|");
+}
+
+const selectionTranslateResultCache = new Map<
+  string,
+  SelectionTranslateResultCacheEntry
+>();
+
+/** A memoized translation, refreshed to most-recent on every hit. */
+export function readSelectionTranslateResultCache(
+  key: string,
+): SelectionTranslateResultCacheEntry | null {
+  if (!key) return null;
+  const entry = selectionTranslateResultCache.get(key);
+  if (!entry) return null;
+  selectionTranslateResultCache.delete(key);
+  selectionTranslateResultCache.set(key, entry);
+  return { ...entry };
+}
+
+export function writeSelectionTranslateResultCache(
+  key: string,
+  entry: SelectionTranslateResultCacheEntry,
+): void {
+  if (!key || !entry?.translation?.trim()) return;
+  selectionTranslateResultCache.delete(key);
+  selectionTranslateResultCache.set(key, { ...entry });
+  while (
+    selectionTranslateResultCache.size > SELECTION_TRANSLATE_RESULT_CACHE_LIMIT
+  ) {
+    const oldest = selectionTranslateResultCache.keys().next().value;
+    if (oldest === undefined) break;
+    selectionTranslateResultCache.delete(oldest);
+  }
+}
+
+export function clearSelectionTranslateResultCache(): void {
+  selectionTranslateResultCache.clear();
 }

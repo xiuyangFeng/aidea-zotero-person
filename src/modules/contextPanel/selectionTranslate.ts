@@ -1,13 +1,32 @@
 import { callLLM, callLLMStream } from "../../utils/llmClient";
 import { getZoteroItem } from "../../utils/zoteroItems";
 import {
+  buildSelectionTranslateResultCacheKey,
   loadSelectionTranslateColdStartCache,
+  readSelectionTranslateResultCache,
   saveSelectionTranslateColdStartCache,
+  writeSelectionTranslateResultCache,
   SELECTION_TRANSLATE_CACHE_SCHEMA_VERSION,
   type SelectionTranslateColdStartCache,
 } from "../../utils/selectionTranslateCacheStore";
+import {
+  buildTermProtectionFingerprint,
+  buildTermProtectionInstruction,
+  findProtectedTerms,
+  type ProtectedTerm,
+} from "../../utils/selectionTermProtection";
+import {
+  listConceptCards,
+  resolveConceptLibraryID,
+} from "../../utils/conceptStore";
 import { providerToMarker, type OAuthProviderId } from "../../utils/oauthCli";
 import { getStringPref } from "./prefHelpers";
+import {
+  normalizeSelectionBilingual,
+  SELECTION_TRANSLATE_BILINGUAL_PREF_KEY,
+  SELECTION_TRANSLATE_TERM_PROTECTION_PREF_KEY,
+  toggleSelectionBilingual,
+} from "./selectionTranslateBilingual";
 import { fnv1aHex } from "../../utils/hash";
 import {
   buildReaderDocumentContext,
@@ -32,10 +51,17 @@ const DEFAULT_SOURCE_LANG = "auto";
 const DEFAULT_TARGET_LANG = "zh-CN";
 const COLD_START_CACHE_TEXT_LIMIT = 8000;
 const SELECTED_TEXT_CHAR_LIMIT = 12000;
+/**
+ * Cards scanned for a term match. Matches the store's own recall window, so a
+ * library too large to scan for chat is also too large to scan here.
+ */
+const TERM_PROTECTION_CANDIDATE_LIMIT = 400;
 
 type SelectionTranslatePrefs = {
   enabled: boolean;
   auto: boolean;
+  bilingual: boolean;
+  termProtection: boolean;
   model: string;
   provider: string;
   sourceLang: string;
@@ -102,6 +128,14 @@ const LANGUAGE_LABELS: Record<string, string> = {
   uk: "Ukrainian",
 };
 
+function readRawPref(key: string): unknown {
+  try {
+    return Zotero.Prefs.get(`${config.prefsPrefix}.${key}`, true);
+  } catch {
+    return undefined;
+  }
+}
+
 function getBooleanPref(key: string, fallback: boolean): boolean {
   const value = Zotero.Prefs.get(`${config.prefsPrefix}.${key}`, true);
   if (typeof value === "boolean") return value;
@@ -114,10 +148,26 @@ function getBooleanPref(key: string, fallback: boolean): boolean {
   return fallback;
 }
 
+function setBooleanPref(key: string, value: boolean): void {
+  try {
+    Zotero.Prefs.set(`${config.prefsPrefix}.${key}`, value, true);
+  } catch {
+    /* ignore pref write failures */
+  }
+}
+
 function getSelectionTranslatePrefs(): SelectionTranslatePrefs {
   return {
     enabled: getBooleanPref("selectionTranslate.enabled", true),
     auto: getBooleanPref("selectionTranslate.auto", true),
+    bilingual: normalizeSelectionBilingual(
+      readRawPref(SELECTION_TRANSLATE_BILINGUAL_PREF_KEY),
+      false,
+    ),
+    termProtection: getBooleanPref(
+      SELECTION_TRANSLATE_TERM_PROTECTION_PREF_KEY,
+      true,
+    ),
     model: getStringPref("selectionTranslate.model").trim(),
     provider: getStringPref("selectionTranslate.provider").trim(),
     sourceLang:
@@ -135,6 +185,33 @@ export function isSelectionTranslateEnabled(): boolean {
 
 export function isSelectionTranslateAutoEnabled(): boolean {
   return getSelectionTranslatePrefs().auto;
+}
+
+/** Whether the popup opens with the source paragraph above the translation. */
+export function isSelectionTranslateBilingualEnabled(): boolean {
+  return getSelectionTranslatePrefs().bilingual;
+}
+
+/**
+ * Persist a bilingual choice and report what was stored.
+ *
+ * The popup's toggle writes through here so a switch made while reading is the
+ * same setting the settings page shows, and so the next popup opens the way the
+ * last one was left.
+ */
+export function setSelectionTranslateBilingualEnabled(
+  enabled: boolean,
+): boolean {
+  const next = Boolean(enabled);
+  setBooleanPref(SELECTION_TRANSLATE_BILINGUAL_PREF_KEY, next);
+  return next;
+}
+
+/** Flip the stored bilingual preference and report the new value. */
+export function toggleSelectionTranslateBilingual(): boolean {
+  return setSelectionTranslateBilingualEnabled(
+    toggleSelectionBilingual(isSelectionTranslateBilingualEnabled()),
+  );
 }
 
 export function getSelectionTranslateLanguageLabel(code: string): string {
@@ -299,6 +376,8 @@ function buildSelectionTranslatePrompt(params: {
   contextMode: "cold-start-cache" | "retrieved-document";
   sourceLang: string;
   targetLang: string;
+  /** Concept-library term rule, or "" when the selection named no term. */
+  termInstruction?: string;
 }): string {
   const sourceLabel = getSelectionTranslateLanguageLabel(params.sourceLang);
   const targetLabel = getSelectionTranslateLanguageLabel(params.targetLang);
@@ -320,6 +399,9 @@ function buildSelectionTranslatePrompt(params: {
     "- If the source already uses LaTeX delimiters, preserve those delimiters exactly.",
     "- Do not wrap formulas in code blocks or add bold/italic formatting.",
     "Return only the translation. Do not add explanations.",
+    // Last, so the rule the reader's own glossary asked for is the last thing
+    // the model reads before the text. Empty when nothing matched.
+    ...(params.termInstruction ? [params.termInstruction] : []),
   ];
 
   if (params.contextMode === "retrieved-document") {
@@ -351,6 +433,35 @@ function buildSelectionTranslatePrompt(params: {
     params.selectedText,
     "</selected-text>",
   ].join("\n");
+}
+
+/**
+ * Terms from this library's concept cards that the selection actually names.
+ *
+ * Soft by design: a reader with no glossary, a library that will not resolve
+ * and a store that throws all land in the same place — an empty list, a prompt
+ * with no term rule, and a translation that behaves exactly as it did before
+ * the feature existed.
+ */
+async function resolveProtectedTerms(params: {
+  item: Zotero.Item;
+  selectedText: string;
+  enabled: boolean;
+}): Promise<ProtectedTerm[]> {
+  if (!params.enabled) return [];
+  try {
+    const libraryID = resolveConceptLibraryID(params.item);
+    if (!libraryID) return [];
+    const cards = await listConceptCards(
+      libraryID,
+      TERM_PROTECTION_CANDIDATE_LIMIT,
+    );
+    if (!cards.length) return [];
+    return findProtectedTerms({ text: params.selectedText, cards });
+  } catch (err) {
+    ztoolkit.log("LLM: selection translation term lookup failed", err);
+    return [];
+  }
 }
 
 const pendingColdStartTasks = new Map<
@@ -517,7 +628,34 @@ export async function translateSelectedTextForReader(params: {
     }
   }
 
+  const protectedTerms = await resolveProtectedTerms({
+    item: document.item,
+    selectedText,
+    enabled: prefs.termProtection,
+  });
+  const termInstruction = buildTermProtectionInstruction({
+    hits: protectedTerms,
+    lang: prefs.targetLang,
+  });
+  // The term rule changes the answer, so it changes the key. Without this a
+  // paragraph translated before the reader recorded its terms would be replayed
+  // untouched afterwards.
+  const cacheKey = buildSelectionTranslateResultCacheKey({
+    itemId: document.item.id,
+    sourceLang: prefs.sourceLang,
+    targetLang: prefs.targetLang,
+    model: modelConfig.model,
+    provider: modelConfig.providerId || modelConfig.providerLabel,
+    contextMode,
+    contextText,
+    selectedText,
+    termFingerprint: buildTermProtectionFingerprint(protectedTerms),
+  });
+
   params.callbacks?.onStage?.("translate");
+  const cached = readSelectionTranslateResultCache(cacheKey);
+  if (cached) return cached;
+
   const translation = normalizeCacheText(
     await callLLMStream(
       {
@@ -527,6 +665,7 @@ export async function translateSelectedTextForReader(params: {
           contextMode,
           sourceLang: prefs.sourceLang,
           targetLang: prefs.targetLang,
+          termInstruction,
         }),
         model: modelConfig.model,
         apiBase: modelConfig.apiBase,
@@ -542,11 +681,13 @@ export async function translateSelectedTextForReader(params: {
   if (!translation) {
     throw new Error("Selection translation returned empty content");
   }
-  return {
+  const result: SelectionTranslateResult = {
     translation,
     model: modelConfig.model,
     provider: modelConfig.providerId || modelConfig.providerLabel,
   };
+  writeSelectionTranslateResultCache(cacheKey, result);
+  return result;
 }
 
 export async function warmSelectionTranslateColdStartForReader(params: {

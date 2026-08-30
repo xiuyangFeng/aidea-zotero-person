@@ -20,6 +20,10 @@ import {
   normalizeWritingCitationStylePreference,
   type WritingCitationStylePreference,
 } from "../utils/writingExport";
+import {
+  normalizeAutoBriefingMode,
+  type AutoBriefingMode,
+} from "../utils/autoBriefing";
 import { clearSelectionTranslateColdStartCache } from "../utils/selectionTranslateCacheStore";
 import {
   canonicalizeSelectedModelIds,
@@ -158,6 +162,7 @@ type PrefKey =
   | "readingCard.template"
   | "readingCard.researchFocus"
   | "writingExport.citationStyle"
+  | "autoBriefing.mode"
   | "uiLanguage";
 
 type Lang = PanelLang;
@@ -198,6 +203,14 @@ const WRITING_CITATION_STYLE_OPTIONS: Array<{
   { value: "auto", labelKey: "writingCitationStyleAuto" },
   { value: "citekey", labelKey: "writingCitationStyleCitekey" },
   { value: "author-year", labelKey: "writingCitationStyleAuthorYear" },
+];
+const AUTO_BRIEFING_MODE_OPTIONS: Array<{
+  value: AutoBriefingMode;
+  labelKey: string;
+}> = [
+  { value: "auto", labelKey: "autoBriefingModeAuto" },
+  { value: "manual", labelKey: "autoBriefingModeManual" },
+  { value: "off", labelKey: "autoBriefingModeOff" },
 ];
 const pref = (key: PrefKey) => `${config.prefsPrefix}.${key}`;
 const getPref = (key: PrefKey): string => {
@@ -2315,6 +2328,41 @@ const SETTINGS_I18N_PAGE_ANCHOR_OVERRIDES: Partial<Record<Lang, Dict>> = {
   },
 };
 
+const SETTINGS_I18N_SELECTION_BILINGUAL_OVERRIDES: Partial<Record<Lang, Dict>> =
+  {
+    "en-US": {
+      selectionTranslateBilingual:
+        "Show the original text above the translation",
+      selectionTranslateBilingualHint:
+        "The selection popup keeps the source paragraph in a compact block above the translation, for checking one hard paragraph against the original. The popup's own A文 button switches it on and off while reading; switching costs no extra request.",
+      selectionTranslateTermProtection: "Protect concept-card terms",
+      selectionTranslateTermProtectionHint:
+        'Asks the translation to keep terms from your glossary in their original form and gloss them once, for the terms a selection actually names. Does nothing until "Extract concept cards" has collected some.',
+    },
+    "zh-CN": {
+      selectionTranslateBilingual: "在译文上方显示原文对照",
+      selectionTranslateBilingualHint:
+        "划词翻译弹窗会在译文上方保留一块紧凑的原文，适合个别硬段落对照确认。阅读时也可点弹窗里的 A文 按钮随时切换，切换不消耗额外请求。",
+      selectionTranslateTermProtection: "保护概念卡术语",
+      selectionTranslateTermProtectionHint:
+        "对选中文本里实际出现的术语，要求译文保留原文写法并在首次出现处附一句简短注释。术语库为空时完全不生效。",
+    },
+  };
+
+const SETTINGS_I18N_SUGGESTED_QUESTIONS_OVERRIDES: Partial<Record<Lang, Dict>> =
+  {
+    "en-US": {
+      suggestedQuestions: "Suggest follow-up questions",
+      suggestedQuestionsHint:
+        "Lets the paper briefing end with 3-5 questions worth asking about that paper, shown as chips under the answer; one click sends the question. The questions ride along with the briefing, so they cost no extra request. Turning this off also hides the chips on briefings you already have.",
+    },
+    "zh-CN": {
+      suggestedQuestions: "推荐追问问题",
+      suggestedQuestionsHint:
+        "让论文速览在末尾附上 3-5 个值得追问的问题，以小标签形式显示在回答下方，点一下即可发送。问题随速览一起生成，不额外消耗请求。关闭后，已生成速览下方的标签也会一并隐藏。",
+    },
+  };
+
 const SETTINGS_I18N_CONCEPT_CARD_OVERRIDES: Partial<Record<Lang, Dict>> = {
   "en-US": {
     conceptAutoRecall: "Recall concept cards automatically",
@@ -2344,6 +2392,25 @@ const SETTINGS_I18N_WRITING_EXPORT_OVERRIDES: Partial<Record<Lang, Dict>> = {
     writingCitationStyleAuto: "自动",
     writingCitationStyleCitekey: "[@citekey]",
     writingCitationStyleAuthorYear: "（作者, 年份）",
+  },
+};
+
+const SETTINGS_I18N_AUTO_BRIEFING_OVERRIDES: Partial<Record<Lang, Dict>> = {
+  "en-US": {
+    autoBriefingMode: "Opening paper briefing",
+    autoBriefingModeHint:
+      "Auto writes a short structured briefing — TL;DR, question, contributions, method, results — the first time you open a paper whose chat is still empty. The briefing is saved with the conversation, so reopening the paper costs nothing. Manual and Off both keep the briefing available from the + menu; only Auto sends it by itself.",
+    autoBriefingModeAuto: "Auto",
+    autoBriefingModeManual: "Manual",
+    autoBriefingModeOff: "Off",
+  },
+  "zh-CN": {
+    autoBriefingMode: "开篇论文速览",
+    autoBriefingModeHint:
+      "「自动」会在你第一次打开某篇论文、且它的对话还是空的时候，自动生成一份结构化速览（一句话总结、研究问题、核心贡献、方法、结果）。速览会随对话一起保存，再次打开该论文不会重复消耗。「手动」和「关闭」都仍可从 + 菜单生成，只有「自动」会主动发送。",
+    autoBriefingModeAuto: "自动",
+    autoBriefingModeManual: "手动",
+    autoBriefingModeOff: "关闭",
   },
 };
 
@@ -2537,6 +2604,8 @@ const tt = (l: Lang): Dict =>
     ...(SETTINGS_I18N_CONSOLE_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_SELECTION_TRANSLATE_OVERRIDES[l] || {}),
     ...SETTINGS_I18N_SELECTION_ACTION_OVERRIDES[l],
+    ...(SETTINGS_I18N_SELECTION_BILINGUAL_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_SELECTION_BILINGUAL_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_OAUTH_ENV_UPDATE_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_COMPOSER_THEME_OVERRIDES["en-US"] || {}),
     ...(SETTINGS_I18N_COMPOSER_THEME_OVERRIDES[l] || {}),
@@ -2544,6 +2613,10 @@ const tt = (l: Lang): Dict =>
     ...(SETTINGS_I18N_TYPOGRAPHY_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_PAGE_ANCHOR_OVERRIDES["en-US"] || {}),
     ...(SETTINGS_I18N_PAGE_ANCHOR_OVERRIDES[l] || {}),
+    ...(SETTINGS_I18N_AUTO_BRIEFING_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_AUTO_BRIEFING_OVERRIDES[l] || {}),
+    ...(SETTINGS_I18N_SUGGESTED_QUESTIONS_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_SUGGESTED_QUESTIONS_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_READING_CARD_OVERRIDES["en-US"] || {}),
     ...(SETTINGS_I18N_READING_CARD_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_CONCEPT_CARD_OVERRIDES["en-US"] || {}),
@@ -4935,6 +5008,14 @@ export async function bootstrapSettingTab(
     if (pal) pal.textContent = L.pageAnchors;
     const pah = doc.querySelector(`#${config.addonRef}-page-anchors-hint`);
     if (pah) pah.textContent = L.pageAnchorsHint;
+    const sql = doc.querySelector(
+      `#${config.addonRef}-suggested-questions-label`,
+    );
+    if (sql) sql.textContent = L.suggestedQuestions;
+    const sqh = doc.querySelector(
+      `#${config.addonRef}-suggested-questions-hint`,
+    );
+    if (sqh) sqh.textContent = L.suggestedQuestionsHint;
     const rctl = doc.querySelector(
       `#${config.addonRef}-reading-card-template-label`,
     );
@@ -4976,6 +5057,15 @@ export async function bootstrapSettingTab(
     );
     if (wcsh) wcsh.textContent = L.writingCitationStyleHint;
     updateWritingCitationStyleUi();
+    const abml = doc.querySelector(
+      `#${config.addonRef}-auto-briefing-mode-label`,
+    );
+    if (abml) abml.textContent = L.autoBriefingMode;
+    const abmh = doc.querySelector(
+      `#${config.addonRef}-auto-briefing-mode-hint`,
+    );
+    if (abmh) abmh.textContent = L.autoBriefingModeHint;
+    updateAutoBriefingModeUi();
     const apt = doc.querySelector(`#${config.addonRef}-author-profiles-title`);
     if (apt) apt.textContent = L.authorProfilesTitle;
     const apm = doc.querySelector(
@@ -5034,6 +5124,30 @@ export async function bootstrapSettingTab(
       `#${config.addonRef}-selection-translate-target-label`,
     );
     if (stTarget) stTarget.textContent = L.selectionTranslateTargetLang;
+    const stBilingual = doc.querySelector(
+      `#${config.addonRef}-selection-translate-bilingual-label`,
+    );
+    if (stBilingual) {
+      stBilingual.textContent = L.selectionTranslateBilingual;
+    }
+    const stBilingualHint = doc.querySelector(
+      `#${config.addonRef}-selection-translate-bilingual-hint`,
+    );
+    if (stBilingualHint) {
+      stBilingualHint.textContent = L.selectionTranslateBilingualHint;
+    }
+    const stTermProtection = doc.querySelector(
+      `#${config.addonRef}-selection-translate-term-protection-label`,
+    );
+    if (stTermProtection) {
+      stTermProtection.textContent = L.selectionTranslateTermProtection;
+    }
+    const stTermProtectionHint = doc.querySelector(
+      `#${config.addonRef}-selection-translate-term-protection-hint`,
+    );
+    if (stTermProtectionHint) {
+      stTermProtectionHint.textContent = L.selectionTranslateTermProtectionHint;
+    }
     const stShowCopy = doc.querySelector(
       `#${config.addonRef}-selection-translate-show-copy-label`,
     );
@@ -6305,6 +6419,7 @@ export async function bootstrapSettingTab(
       "readingCard.template": "",
       "readingCard.researchFocus": "",
       "writingExport.citationStyle": "auto",
+      "autoBriefing.mode": "auto",
     };
     for (const [key, value] of Object.entries(defaults)) {
       setPref(key as PrefKey, value);
@@ -6317,12 +6432,15 @@ export async function bootstrapSettingTab(
     Zotero.Prefs.set(`${config.prefsPrefix}.showPopupAddText`, true, true);
     Zotero.Prefs.set(`${config.prefsPrefix}.showAllModels`, false, true);
     setBoolPref("pageAnchors.enabled", true);
+    setBoolPref("suggestedQuestions.enabled", true);
     setBoolPref("conceptCards.autoRecall", true);
     setBoolPref("authorProfiles.contextMenuEnabled", false);
     setBoolPref("selectionTranslate.enabled", true);
     setBoolPref("selectionTranslate.auto", true);
     setBoolPref("selectionTranslate.showCopyButton", true);
     setBoolPref("selectionTranslate.showAddToNoteButton", true);
+    setBoolPref("selectionTranslate.bilingual", false);
+    setBoolPref("selectionTranslate.termProtection", true);
     setBoolPref("translate.outputMono", true);
     setBoolPref("translate.outputDual", true);
     setBoolPref("translate.skipReferencesAuto", true);
@@ -6374,6 +6492,8 @@ export async function bootstrapSettingTab(
     if (conceptRecallInput) conceptRecallInput.checked = true;
     writingCitationStyleValue = "auto";
     updateWritingCitationStyleUi();
+    autoBriefingModeValue = "auto";
+    updateAutoBriefingModeUi();
     if (popupInput) popupInput.checked = true;
     if (authorProfilesMenuInput) {
       authorProfilesMenuInput.checked = false;
@@ -6717,6 +6837,22 @@ export async function bootstrapSettingTab(
     });
   };
 
+  // Same shape as the citation-style control, and declared just as early so
+  // the first renderStaticText() can label it before it is built.
+  let autoBriefingModeValue = normalizeAutoBriefingMode(
+    getPref("autoBriefing.mode"),
+  );
+  let autoBriefingModeBtns: Array<{
+    button: HTMLButtonElement;
+    option: (typeof AUTO_BRIEFING_MODE_OPTIONS)[number];
+  }> = [];
+  const updateAutoBriefingModeUi = () => {
+    autoBriefingModeBtns.forEach(({ button, option }) => {
+      button.textContent = L[option.labelKey] || option.value;
+      button.classList.toggle("active", option.value === autoBriefingModeValue);
+    });
+  };
+
   const advancedGroup = createEl(doc, "div", "llm-set-card");
   const advancedTitle = createEl(
     doc,
@@ -6834,6 +6970,54 @@ export async function bootstrapSettingTab(
     setBoolPref("pageAnchors.enabled", pageAnchorInput.checked);
   });
 
+  // ── Suggested follow-up questions ──
+  // Gates both halves at once: the model stops being asked for the block, and
+  // blocks already stored stop being rendered as chips (they are still
+  // stripped out of the answer, so no raw marker ever surfaces).
+  const suggestedQuestionsWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const suggestedQuestionsLabel = createEl(doc, "label", "llm-set-radio-label");
+  const suggestedQuestionsInput = createEl(
+    doc,
+    "input",
+    "llm-set-checkbox",
+  ) as HTMLInputElement;
+  suggestedQuestionsInput.type = "checkbox";
+  suggestedQuestionsInput.checked = getBoolPref(
+    "suggestedQuestions.enabled",
+    true,
+  );
+  const suggestedQuestionsText = createEl(
+    doc,
+    "span",
+    "",
+    L.suggestedQuestions,
+  );
+  suggestedQuestionsText.id = `${config.addonRef}-suggested-questions-label`;
+  suggestedQuestionsLabel.append(
+    suggestedQuestionsInput,
+    suggestedQuestionsText,
+  );
+  const suggestedQuestionsHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.suggestedQuestionsHint,
+  );
+  suggestedQuestionsHint.id = `${config.addonRef}-suggested-questions-hint`;
+  suggestedQuestionsWrap.append(
+    suggestedQuestionsLabel,
+    suggestedQuestionsHint,
+  );
+  advancedBody.appendChild(suggestedQuestionsWrap);
+
+  suggestedQuestionsInput.addEventListener("change", () => {
+    setBoolPref("suggestedQuestions.enabled", suggestedQuestionsInput.checked);
+  });
+
   // ── Concept cards ──
   // Gates only the recall side: the cards keep accumulating either way.
   const conceptRecallWrap = createEl(
@@ -6911,6 +7095,52 @@ export async function bootstrapSettingTab(
     writingCitationStyleHint,
   );
   advancedBody.appendChild(writingCitationStyleWrap);
+
+  // ── Opening paper briefing ──
+  // Three states, not two: "manual" keeps the + menu action without ever
+  // sending by itself, which is a different intent from switching it off.
+  const autoBriefingModeWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-segment-field llm-set-auto-briefing-field llm-set-subsection",
+  );
+  const autoBriefingModeLabel = createEl(
+    doc,
+    "label",
+    "llm-set-label",
+    L.autoBriefingMode,
+  );
+  autoBriefingModeLabel.id = `${config.addonRef}-auto-briefing-mode-label`;
+  const autoBriefingModeTabBar = createEl(doc, "div", "llm-set-tab-bar");
+  const autoBriefingModeHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.autoBriefingModeHint,
+  );
+  autoBriefingModeHint.id = `${config.addonRef}-auto-briefing-mode-hint`;
+  autoBriefingModeBtns = AUTO_BRIEFING_MODE_OPTIONS.map((option) => {
+    const button = createEl(
+      doc,
+      "button",
+      "llm-set-tab-btn",
+    ) as HTMLButtonElement;
+    button.type = "button";
+    button.addEventListener("click", () => {
+      autoBriefingModeValue = option.value;
+      setPref("autoBriefing.mode", option.value);
+      updateAutoBriefingModeUi();
+    });
+    autoBriefingModeTabBar.appendChild(button);
+    return { button, option };
+  });
+  updateAutoBriefingModeUi();
+  autoBriefingModeWrap.append(
+    autoBriefingModeLabel,
+    autoBriefingModeTabBar,
+    autoBriefingModeHint,
+  );
+  advancedBody.appendChild(autoBriefingModeWrap);
 
   // ── Reading card ──
   // Both fields feed the "+ → Generate reading card" prompt. Empty is the
@@ -7291,6 +7521,94 @@ export async function bootstrapSettingTab(
     selectionTranslateTargetField,
   );
 
+  const selectionTranslateBilingualField = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const selectionTranslateBilingualLabel = createEl(
+    doc,
+    "label",
+    "llm-set-radio-label",
+  );
+  const selectionTranslateBilingualInput = createEl(
+    doc,
+    "input",
+    "llm-set-checkbox",
+  ) as HTMLInputElement;
+  selectionTranslateBilingualInput.type = "checkbox";
+  selectionTranslateBilingualInput.id = `${config.addonRef}-selection-translate-bilingual`;
+  selectionTranslateBilingualInput.checked = getBoolPref(
+    "selectionTranslate.bilingual",
+    false,
+  );
+  const selectionTranslateBilingualText = createEl(
+    doc,
+    "span",
+    "",
+    L.selectionTranslateBilingual,
+  );
+  selectionTranslateBilingualText.id = `${config.addonRef}-selection-translate-bilingual-label`;
+  selectionTranslateBilingualLabel.append(
+    selectionTranslateBilingualInput,
+    selectionTranslateBilingualText,
+  );
+  const selectionTranslateBilingualHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.selectionTranslateBilingualHint,
+  );
+  selectionTranslateBilingualHint.id = `${config.addonRef}-selection-translate-bilingual-hint`;
+  selectionTranslateBilingualField.append(
+    selectionTranslateBilingualLabel,
+    selectionTranslateBilingualHint,
+  );
+
+  const selectionTranslateTermProtectionField = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const selectionTranslateTermProtectionLabel = createEl(
+    doc,
+    "label",
+    "llm-set-radio-label",
+  );
+  const selectionTranslateTermProtectionInput = createEl(
+    doc,
+    "input",
+    "llm-set-checkbox",
+  ) as HTMLInputElement;
+  selectionTranslateTermProtectionInput.type = "checkbox";
+  selectionTranslateTermProtectionInput.id = `${config.addonRef}-selection-translate-term-protection`;
+  selectionTranslateTermProtectionInput.checked = getBoolPref(
+    "selectionTranslate.termProtection",
+    true,
+  );
+  const selectionTranslateTermProtectionText = createEl(
+    doc,
+    "span",
+    "",
+    L.selectionTranslateTermProtection,
+  );
+  selectionTranslateTermProtectionText.id = `${config.addonRef}-selection-translate-term-protection-label`;
+  selectionTranslateTermProtectionLabel.append(
+    selectionTranslateTermProtectionInput,
+    selectionTranslateTermProtectionText,
+  );
+  const selectionTranslateTermProtectionHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.selectionTranslateTermProtectionHint,
+  );
+  selectionTranslateTermProtectionHint.id = `${config.addonRef}-selection-translate-term-protection-hint`;
+  selectionTranslateTermProtectionField.append(
+    selectionTranslateTermProtectionLabel,
+    selectionTranslateTermProtectionHint,
+  );
+
   const selectionTranslateShowCopyField = createEl(
     doc,
     "div",
@@ -7424,6 +7742,8 @@ export async function bootstrapSettingTab(
     selectionTranslateEnableField,
     selectionTranslateModelField,
     languageRow,
+    selectionTranslateBilingualField,
+    selectionTranslateTermProtectionField,
     selectionTranslateShowCopyField,
     selectionTranslateShowAddToNoteField,
     selectionTranslateColdStartField,
@@ -7442,6 +7762,18 @@ export async function bootstrapSettingTab(
   });
   selectionTranslateAutoInput.addEventListener("change", () => {
     setBoolPref("selectionTranslate.auto", selectionTranslateAutoInput.checked);
+  });
+  selectionTranslateBilingualInput.addEventListener("change", () => {
+    setBoolPref(
+      "selectionTranslate.bilingual",
+      selectionTranslateBilingualInput.checked,
+    );
+  });
+  selectionTranslateTermProtectionInput.addEventListener("change", () => {
+    setBoolPref(
+      "selectionTranslate.termProtection",
+      selectionTranslateTermProtectionInput.checked,
+    );
   });
   selectionTranslateShowCopyInput.addEventListener("change", () => {
     setBoolPref(

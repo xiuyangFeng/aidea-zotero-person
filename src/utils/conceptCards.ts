@@ -278,6 +278,34 @@ export function parseConceptCards(
 }
 
 /**
+ * Where a term key first occurs inside an already-keyed haystack, or -1.
+ *
+ * Word-bounded for Latin scripts and plain containment for CJK, which has no
+ * word separators. Both sides must already have been through `conceptTermKey`,
+ * which is what makes the match case-, width- and punctuation-insensitive.
+ * Exposed as an index rather than a boolean so callers that order their hits by
+ * where they appear share one definition of "the term is in this text".
+ */
+export function conceptTermKeyIndexIn(
+  textKey: string,
+  termKey: string,
+): number {
+  if (!textKey || !termKey || termKey.length < 2) return -1;
+  if (CJK_PATTERN.test(termKey)) return textKey.indexOf(termKey);
+  // The pad lets a term at either end still match on a space boundary; a hit at
+  // padded index i starts at textKey index i, so no offset correction is due.
+  return ` ${textKey} `.indexOf(` ${termKey} `);
+}
+
+/** Whether a keyed term occurs in a keyed haystack. */
+export function conceptTermKeyOccursIn(
+  textKey: string,
+  termKey: string,
+): boolean {
+  return conceptTermKeyIndexIn(textKey, termKey) >= 0;
+}
+
+/**
  * Score a stored card against the user's message.
  *
  * A glossary should fire when the user actually names the term, so the whole
@@ -300,10 +328,7 @@ export function scoreConceptCard(
   if (!termKey || !queryKey || termKey.length < 2) return 0;
 
   let base = 0;
-  const contained = CJK_PATTERN.test(termKey)
-    ? queryKey.includes(termKey)
-    : ` ${queryKey} `.includes(` ${termKey} `);
-  if (contained) {
+  if (conceptTermKeyOccursIn(queryKey, termKey)) {
     base = 1;
   } else {
     const termTokens = termKey.split(" ").filter((token) => token.length >= 2);

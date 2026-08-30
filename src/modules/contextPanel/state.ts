@@ -1,3 +1,4 @@
+import type { FigureCatalogEntry } from "../../utils/figureCatalog";
 import type { ModelProfileKey } from "./constants";
 import type { DocumentKind } from "./document/types";
 import type {
@@ -74,6 +75,18 @@ export const documentTextLoadingTasks = new Map<number, Promise<void>>();
 export const pdfTextCache = documentTextCache;
 export const pdfTextLoadingTasks = documentTextLoadingTasks;
 export const documentTextRetryAfterByItem = new Map<number, number>();
+/**
+ * Parsed Figure/Table catalogs, keyed by document attachment id.
+ *
+ * Scanning a whole paper for captions is cheap but not free, and the figure
+ * navigator is opened repeatedly while reading one paper. The stored revision
+ * is derived from the extracted text, so a re-extraction (or switching to
+ * another document, which uses another key) invalidates the entry by itself.
+ */
+export const figureCatalogCache = new Map<
+  number,
+  { revision: string; entries: FigureCatalogEntry[] }
+>();
 export const epubTextRetryAfterByItem = documentTextRetryAfterByItem;
 export const shortcutTextCache = new Map<string, string>();
 export const shortcutMoveModeState = new WeakMap<Element, boolean>();
