@@ -329,3 +329,32 @@ export function shouldStillAutoBrief(input: AutoBriefingRecheckInput): boolean {
   if (input.generating) return false;
   return true;
 }
+
+/** The two ids a pinned paper chip carries: parent item and attachment. */
+export type PaperPinIds = {
+  itemId: number;
+  contextItemId: number;
+};
+
+/**
+ * Whether pinned paper contexts should veto the automatic briefing.
+ *
+ * Paper pins persist with the conversation, so a chip added in the library
+ * panel weeks ago reappears the moment the same paper opens in a reader —
+ * treating it as work-in-progress would silence auto briefing for that paper
+ * forever. A pin that resolves to the panel's own document duplicates what
+ * the base context already sends and is no reason to stay quiet; only pins
+ * pointing at *other* papers mark a curated multi-paper workspace the
+ * briefing must not barge into.
+ */
+export function paperPinsBlockAutoBriefing(
+  pins: readonly PaperPinIds[],
+  panelItemIds: readonly number[],
+): boolean {
+  const own = new Set(
+    panelItemIds.filter((id) => Number.isFinite(id) && id > 0),
+  );
+  return pins.some(
+    (pin) => !own.has(pin.itemId) && !own.has(pin.contextItemId),
+  );
+}

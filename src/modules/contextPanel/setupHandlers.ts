@@ -156,6 +156,7 @@ import {
   buildPaperBriefingPrompt,
   evaluateAutoBriefingGate,
   getAutoBriefingMode,
+  paperPinsBlockAutoBriefing,
   shouldStillAutoBrief,
 } from "../../utils/autoBriefing";
 import {
@@ -8018,13 +8019,26 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
    * restored draft or a passage the reader just pinned is enough to call the
    * briefing off — it would otherwise destroy work the user can no longer get
    * back. Drafts survive a panel rebuild, which is exactly the case where an
-   * automatic send would arrive unannounced.
+   * automatic send would arrive unannounced. Paper pins are the exception:
+   * they persist with the conversation, so a chip for this very paper (pinned
+   * long ago in the library panel) must not veto the briefing forever — only
+   * pins pointing at other papers count as a workspace to stay out of.
    */
   const isComposerInUse = (panelItem: Zotero.Item): boolean => {
     if (inputBox.value.trim()) return true;
     const key = getConversationKey(panelItem);
     if (key > 0 && getSelectedTextContextEntries(key).length) return true;
-    if ((selectedPaperContextCache.get(panelItem.id) || []).length) return true;
+    const ownItemIds = [panelItem.id];
+    const parentId = panelItem.parentID;
+    if (typeof parentId === "number") ownItemIds.push(parentId);
+    if (
+      paperPinsBlockAutoBriefing(
+        selectedPaperContextCache.get(panelItem.id) || [],
+        ownItemIds,
+      )
+    ) {
+      return true;
+    }
     if ((selectedFileAttachmentCache.get(panelItem.id) || []).length)
       return true;
     if ((selectedImageCache.get(panelItem.id) || []).length) return true;

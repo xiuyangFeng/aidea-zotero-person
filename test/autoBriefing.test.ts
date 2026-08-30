@@ -10,6 +10,7 @@ import {
   evaluateAutoBriefingGate,
   getAutoBriefingMode,
   normalizeAutoBriefingMode,
+  paperPinsBlockAutoBriefing,
   resolveAutoBriefingLang,
   shouldStillAutoBrief,
   type AutoBriefingGateInput,
@@ -406,6 +407,64 @@ describe("auto briefing", function () {
     it("drops when the conversation was unloaded while waiting", function () {
       assert.isFalse(
         shouldStillAutoBrief({ ...READY_RECHECK, conversationLoaded: false }),
+      );
+    });
+  });
+
+  describe("paperPinsBlockAutoBriefing", function () {
+    const ATTACHMENT_ID = 42;
+    const PARENT_ID = 7;
+    const OWN_IDS = [ATTACHMENT_ID, PARENT_ID];
+
+    it("does not block when nothing is pinned", function () {
+      assert.isFalse(paperPinsBlockAutoBriefing([], OWN_IDS));
+    });
+
+    it("does not block when the pin is the panel's own attachment", function () {
+      assert.isFalse(
+        paperPinsBlockAutoBriefing(
+          [{ itemId: 999, contextItemId: ATTACHMENT_ID }],
+          OWN_IDS,
+        ),
+      );
+    });
+
+    it("does not block when the pin resolves to the panel's parent item", function () {
+      assert.isFalse(
+        paperPinsBlockAutoBriefing(
+          [{ itemId: PARENT_ID, contextItemId: 555 }],
+          OWN_IDS,
+        ),
+      );
+    });
+
+    it("blocks when a pin points at a different paper", function () {
+      assert.isTrue(
+        paperPinsBlockAutoBriefing(
+          [{ itemId: 999, contextItemId: 888 }],
+          OWN_IDS,
+        ),
+      );
+    });
+
+    it("blocks when any pin among self pins is a different paper", function () {
+      assert.isTrue(
+        paperPinsBlockAutoBriefing(
+          [
+            { itemId: PARENT_ID, contextItemId: ATTACHMENT_ID },
+            { itemId: 999, contextItemId: 888 },
+          ],
+          OWN_IDS,
+        ),
+      );
+    });
+
+    it("ignores invalid panel ids instead of matching them", function () {
+      assert.isTrue(
+        paperPinsBlockAutoBriefing(
+          [{ itemId: 0, contextItemId: -1 }],
+          [0, -1, Number.NaN],
+        ),
       );
     });
   });
