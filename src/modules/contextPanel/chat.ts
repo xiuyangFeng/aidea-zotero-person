@@ -41,11 +41,13 @@ import {
 import type {
   Message,
   AdvancedModelParams,
+  AnnotationContextSelection,
   ChatAttachment,
   SelectedTextSource,
   PaperContextRef,
   SelectedTextContext,
 } from "./types";
+import { buildModelPromptWithAnnotationContext } from "../../utils/annotationContext";
 import {
   chatHistory,
   loadedConversationKeys,
@@ -68,6 +70,7 @@ import {
   selectedPaperContextCache,
   selectedImageCache,
   selectedTextCache,
+  selectedAnnotationContextCache,
 } from "./state";
 import {
   sanitizeText,
@@ -116,6 +119,16 @@ import {
   resolveReaderDocument,
 } from "./documentContext";
 import { buildSinglePaperContext } from "./paperContext";
+import {
+  buildPageAnchorInstruction,
+  extractSupplementalAnchorIds,
+  hasPageMarkers,
+  withSupplementalAnchorId,
+} from "../../utils/pageAnchors";
+import {
+  createPageAnchorHrefResolver,
+  type PageAnchorScopeOptions,
+} from "./pageAnchorTargets";
 import { formatPaperCitationLabel } from "./paperAttribution";
 import { resolveContextSourceItem } from "./contextResolution";
 import { buildChatHistoryNotePayload } from "./notes";
@@ -133,8 +146,58 @@ import {
   resolveMemoryLibraryID,
   searchMemories,
 } from "../../utils/memoryStore";
+import {
+  formatRelevantConceptsContext,
+  isConceptAutoRecallEnabled,
+} from "../../utils/conceptCards";
+import { searchConceptCards } from "../../utils/conceptStore";
 
 const activeStreamingAssistantMessages = new Map<number, Message>();
+
+export type AssistantTurnOutcome = "ok" | "cancelled" | "error";
+
+export type AssistantTurnResult = {
+  item: Zotero.Item;
+  conversationKey: number;
+  /** Final assistant text, whatever the outcome. */
+  text: string;
+  outcome: AssistantTurnOutcome;
+};
+
+/**
+ * One-shot hook on the next answer produced through `sendQuestion`.
+ *
+ * Actions that drive the normal send path — concept extraction, for one — need
+ * the finished text back so they can act on it, but they hand the prompt over
+ * to the composer and lose the thread. A single-slot claim keeps that simple:
+ * the caller stakes it immediately before clicking send, the very next turn
+ * settles it, and it can never carry over to a second turn. Handlers still
+ * check the answer's shape, because a send that never starts leaves the claim
+ * standing until some later turn clears it.
+ */
+let pendingAssistantTurnClaim: ((result: AssistantTurnResult) => void) | null =
+  null;
+
+export function claimNextAssistantTurn(
+  handler: (result: AssistantTurnResult) => void,
+): void {
+  pendingAssistantTurnClaim = handler;
+}
+
+export function releaseAssistantTurnClaim(): void {
+  pendingAssistantTurnClaim = null;
+}
+
+function settleAssistantTurnClaim(result: AssistantTurnResult): void {
+  const handler = pendingAssistantTurnClaim;
+  pendingAssistantTurnClaim = null;
+  if (!handler) return;
+  try {
+    handler(result);
+  } catch (err) {
+    ztoolkit.log("LLM: assistant turn claim handler failed", err);
+  }
+}
 
 function getAbortController(): new () => AbortController {
   return (
@@ -846,13 +909,18 @@ export async function copyTextToClipboard(
 export async function copyRenderedMarkdownToClipboard(
   body: Element,
   markdownText: string,
+  anchorScope?: PageAnchorScopeOptions,
 ): Promise<void> {
   const safeText = sanitizeText(markdownText).trim();
   if (!safeText) return;
 
   let renderedHtml = "";
   try {
-    renderedHtml = renderMarkdownForNote(safeText);
+    renderedHtml = renderMarkdownForNote(safeText, {
+      pageAnchorResolver: anchorScope
+        ? createPageAnchorHrefResolver(anchorScope)
+        : null,
+    });
   } catch (err) {
     ztoolkit.log("LLM: Copy markdown render error:", err);
   }
@@ -1203,6 +1271,41 @@ async function buildCombinedContextForRequest(params: {
       ztoolkit.log("LLM: Memory recall failed", err);
     }
   }
+
+  // ── Zone A: Concept cards (glossary recall, re-queried every turn) ──
+  // Kept separate from memories: the glossary is matched on whether the user
+  // named a term, not on overall similarity, and it carries its own source.
+  let conceptContext = "";
+  if (
+    memoryLibraryID &&
+    params.question.trim() &&
+    isConceptAutoRecallEnabled()
+  ) {
+    try {
+      const concepts = await searchConceptCards({
+        libraryID: memoryLibraryID,
+        query: params.question,
+      });
+      if (concepts.length) {
+        conceptContext = formatRelevantConceptsContext(
+          concepts.map((card) => ({
+            term: card.term,
+            definition: card.definition,
+            sourceTitle: card.sourceTitle,
+            page: card.page,
+          })),
+        );
+        if (conceptContext) {
+          params.setStatusSafely(
+            getPanelI18n().conceptRecallStatus(concepts.length),
+            "sending",
+          );
+        }
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: Concept card recall failed", err);
+    }
+  }
   throwIfRequestAborted(params.signal);
 
   // ── Zone A: Base PDF context (cached after first build) ──
@@ -1406,8 +1509,16 @@ async function buildCombinedContextForRequest(params: {
   const supplementalBlocks: string[] = [];
   let remainingSupplementalBudget = SUPPLEMENTAL_PAPER_CONTEXT_TOTAL_MAX_LENGTH;
   let droppedSupplementalCount = 0;
+  let supplementalPosition = 0;
   for (const entry of pool.supplementalContexts.values()) {
-    const block = entry.builtContext;
+    // Anchor tokens are assigned here rather than when the block was cached,
+    // so they stay aligned with the persisted context refs that a page-anchor
+    // click resolves against even after papers are unpinned and re-pinned.
+    const block = withSupplementalAnchorId(
+      entry.builtContext,
+      supplementalPosition,
+    );
+    supplementalPosition += 1;
     if (!block) continue;
     if (remainingSupplementalBudget <= 0) {
       droppedSupplementalCount += 1;
@@ -1446,8 +1557,24 @@ async function buildCombinedContextForRequest(params: {
     ? `${supplementalHeading}\n\n${supplementalBlocks.join("\n\n---\n\n")}`
     : "";
 
+  // Page citations are asked for next to the data, not in the system prompt,
+  // which the user may have replaced. Formats without page markers (EPUB) and
+  // papers with metadata only simply contribute no anchor tokens here.
+  const pageAnchorInstruction = buildPageAnchorInstruction({
+    hasBaseDocument: hasPageMarkers(pdfContext),
+    supplementalAnchorIds: supplementalBlocks.flatMap((block) =>
+      hasPageMarkers(block) ? extractSupplementalAnchorIds(block) : [],
+    ),
+  });
+
   throwIfRequestAborted(params.signal);
-  return [memoryContext, pdfContext, supplementalPaperContext]
+  return [
+    memoryContext,
+    conceptContext,
+    pdfContext,
+    supplementalPaperContext,
+    pageAnchorInstruction,
+  ]
     .map((entry) => sanitizeText(entry || "").trim())
     .filter(Boolean)
     .join("\n\n====================\n\n");
@@ -2045,7 +2172,18 @@ export function findLatestRetryPair(
   return null;
 }
 
-function reconstructRetryPayload(userMessage: Message): {
+/**
+ * Rebuild the model prompt for a stored user turn.
+ *
+ * `annotationContext` is passed only by the retry and edit paths: annotations
+ * are pinned per item rather than stored on the message, and replaying them
+ * into every reconstructed history turn would duplicate the whole block once
+ * per turn.
+ */
+function reconstructRetryPayload(
+  userMessage: Message,
+  annotationContext?: AnnotationContextSelection | null,
+): {
   question: string;
   screenshotImages: string[];
   fileAttachments: ChatFileAttachment[];
@@ -2092,9 +2230,10 @@ function reconstructRetryPayload(userMessage: Message): {
         },
       )
     : promptText;
-  const question = buildModelPromptWithFileContext(
-    composedQuestionBase,
-    fileAttachments,
+  const question = buildModelPromptWithAnnotationContext(
+    buildModelPromptWithFileContext(composedQuestionBase, fileAttachments),
+    annotationContext?.records || [],
+    { title: annotationContext?.title },
   );
   const screenshotImages = Array.isArray(userMessage.screenshotImages)
     ? userMessage.screenshotImages
@@ -2261,7 +2400,10 @@ export async function editUserMessageAndRetry(
     attachmentActiveIndex: undefined,
   };
   const { question, screenshotImages, fileAttachments, paperContexts } =
-    reconstructRetryPayload(nextUserMessage);
+    reconstructRetryPayload(
+      nextUserMessage,
+      selectedAnnotationContextCache.get(item.id) || null,
+    );
   if (!question.trim()) return "missing";
 
   let effectiveRequestConfig: EffectiveRequestConfig;
@@ -2627,7 +2769,10 @@ export async function retryLatestAssistantResponse(
   const generatedImageContext =
     collectRecentGeneratedImageDataUrls(historyForLLM);
   const { question, screenshotImages, fileAttachments, paperContexts } =
-    reconstructRetryPayload(retryPair.userMessage);
+    reconstructRetryPayload(
+      retryPair.userMessage,
+      selectedAnnotationContextCache.get(item.id) || null,
+    );
   if (!question.trim()) {
     setStatusSafely(i18n.nothingToRetryLatestTurn, "error");
     finishPanelRequestUI(body, ui, conversationKey, thisRequestId);
@@ -3091,6 +3236,9 @@ export async function sendQuestion(
   }
   refreshChatSafely();
 
+  // Reported to whoever claimed this turn; only the success path upgrades it.
+  let turnOutcome: AssistantTurnOutcome = "cancelled";
+
   const persistAssistantUpdate = async () => {
     if (!assistantMessage.messageId) return;
     await updateMessageNode(conversationKey, assistantMessage.messageId, {
@@ -3230,6 +3378,7 @@ export async function sendQuestion(
       activeStreamingAssistantMessages.delete(assistantMessage.messageId);
     }
 
+    turnOutcome = "ok";
     setStatusSafely(i18n.statusReady, "ready");
     await autoCaptureRequestMemories({
       item,
@@ -3247,6 +3396,7 @@ export async function sendQuestion(
       return;
     }
 
+    turnOutcome = "error";
     const errMsg = (err as Error).message || "Error";
     const retryHint = resolveMultimodalRetryHint(errMsg, imageCount);
     assistantMessage.text = i18n.operationFailed(`${errMsg}${retryHint}`);
@@ -3263,6 +3413,13 @@ export async function sendQuestion(
     );
   } finally {
     finishPanelRequestUI(body, ui, conversationKey, thisRequestId);
+    // After the panel is idle again, so a handler may set its own status.
+    settleAssistantTurnClaim({
+      item,
+      conversationKey,
+      text: assistantMessage.text,
+      outcome: turnOutcome,
+    });
   }
 }
 

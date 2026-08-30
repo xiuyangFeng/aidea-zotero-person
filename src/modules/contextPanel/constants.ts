@@ -82,6 +82,34 @@ export const ACTION_LAYOUT_MODEL_WRAP_MIN_CHARS = 12;
 export const ACTION_LAYOUT_MODEL_FULL_MAX_LINES = 3;
 export const CUSTOM_SHORTCUT_ID_PREFIX = "custom-shortcut";
 
+/**
+ * Prompt behind the "Summarize my annotations" menu action.
+ *
+ * Deliberately kept out of BUILTIN_SHORTCUT_FILES: it is reached from the
+ * context menu, so registering it as a shortcut would spend one of the
+ * MAX_EDITABLE_SHORTCUTS slots the user can fill themselves.
+ */
+export const ANNOTATION_SUMMARY_SHORTCUT_FILE = "annotation-summary.txt";
+
+/**
+ * Built-in template behind the "Generate reading card" menu action.
+ *
+ * Kept out of BUILTIN_SHORTCUT_FILES for the same reason as the annotation
+ * summary: the action lives in the attach menu, so it should not consume one
+ * of the MAX_EDITABLE_SHORTCUTS slots. Users customise it through the
+ * reading-card template preference instead.
+ */
+export const READING_CARD_SHORTCUT_FILE = "reading-card.txt";
+
+/**
+ * Built-in template behind the "Extract concept cards" menu action.
+ *
+ * Kept out of BUILTIN_SHORTCUT_FILES for the same reason as the reading card:
+ * the action lives in the attach menu, so it should not consume one of the
+ * MAX_EDITABLE_SHORTCUTS slots.
+ */
+export const CONCEPT_CARDS_SHORTCUT_FILE = "concept-cards.txt";
+
 export const BUILTIN_SHORTCUT_FILES = [
   { id: "translate", label: "Translate", file: "translate.txt" },
   { id: "summarize", label: "Summarize", file: "summarize.txt" },

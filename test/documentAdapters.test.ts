@@ -37,6 +37,7 @@ import type {
 import { buildContext } from "../src/modules/contextPanel/pdfContext";
 
 const originalZtoolkit = (globalThis as Record<string, unknown>).ztoolkit;
+const originalZotero = (globalThis as Record<string, unknown>).Zotero;
 
 function makeAttachment(
   id: number,
@@ -134,6 +135,66 @@ describe("document adapters", function () {
     assert.strictEqual(getDocumentAdapterForItem(pdf), pdfDocumentAdapter);
     assert.strictEqual(getDocumentAdapterForItem(epub), epubDocumentAdapter);
     assert.isNull(getDocumentAdapterForItem(html));
+  });
+
+  describe("PDF page markers", function () {
+    let fullText = "";
+    let totalPages = 0;
+    let anchorsEnabled: unknown = true;
+
+    beforeEach(function () {
+      (globalThis as Record<string, unknown>).Zotero = {
+        PDFWorker: {
+          getFullText: async () => ({
+            text: fullText,
+            extractedPages: totalPages,
+            totalPages,
+          }),
+        },
+        Prefs: { get: () => anchorsEnabled },
+      };
+    });
+
+    afterEach(function () {
+      anchorsEnabled = true;
+      if (originalZotero === undefined) {
+        delete (globalThis as Record<string, unknown>).Zotero;
+      } else {
+        (globalThis as Record<string, unknown>).Zotero = originalZotero;
+      }
+    });
+
+    it("turns the worker's form feeds into citable page markers", async function () {
+      fullText = "intro text\n\n\fmethod text\n\n";
+      totalPages = 2;
+      const extraction = await pdfDocumentAdapter.extract(
+        makeAttachment(1, "application/pdf", "Paper"),
+      );
+      assert.equal(
+        extraction.text,
+        "[page 1]\nintro text\n\n[page 2]\nmethod text",
+      );
+      assert.equal(extraction.completeness, "complete");
+    });
+
+    it("leaves the extracted text alone when the preference is off", async function () {
+      fullText = "intro text\n\n\fmethod text\n\n";
+      totalPages = 2;
+      anchorsEnabled = false;
+      const extraction = await pdfDocumentAdapter.extract(
+        makeAttachment(1, "application/pdf", "Paper"),
+      );
+      assert.equal(extraction.text, fullText);
+    });
+
+    it("keeps the preference state in the cache revision", async function () {
+      const attachment = makeAttachment(1, "application/pdf", "Paper");
+      const enabled = await pdfDocumentAdapter.getSourceRevision?.(attachment);
+      anchorsEnabled = false;
+      const disabled = await pdfDocumentAdapter.getSourceRevision?.(attachment);
+      assert.include(String(enabled), "|pageAnchors:on");
+      assert.include(String(disabled), "|pageAnchors:off");
+    });
   });
 
   it("normalizes relative EPUB references and fragments", function () {

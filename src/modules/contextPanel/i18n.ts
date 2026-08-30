@@ -56,6 +56,44 @@ export type PanelI18n = {
   noLibrarySelection: string;
   paperContextBatchAdded: (added: number, skipped: number) => string;
   paperContextAdded: (n: number, max: number) => string;
+  addMyAnnotations: string;
+  summarizeMyAnnotations: string;
+  annotationContextLabel: (count: number) => string;
+  annotationContextAdded: (count: number) => string;
+  annotationContextTruncated: (included: number, total: number) => string;
+  annotationContextNone: string;
+  annotationContextUnavailable: string;
+  annotationContextCleared: string;
+  clearAnnotationContext: string;
+  annotationSummaryPromptFailed: string;
+  generateReadingCard: string;
+  readingCardPromptFailed: string;
+  readingCardNoDocument: string;
+  readingCardSending: string;
+  extractConceptCards: string;
+  recordConceptCard: string;
+  exportGlossary: string;
+  conceptPromptFailed: string;
+  conceptNoDocument: string;
+  conceptExtractSending: string;
+  conceptDefineSending: (term: string) => string;
+  conceptTermMissing: string;
+  conceptParseFailed: string;
+  conceptStoreFailed: string;
+  conceptCardsStored: (created: number, skipped: number) => string;
+  conceptRecallStatus: (count: number) => string;
+  glossaryExporting: string;
+  glossaryEmpty: string;
+  glossaryExported: (count: number) => string;
+  glossaryExportedAndCopied: (count: number) => string;
+  glossaryExportFailed: string;
+  exportWritingDraft: string;
+  writingDraftExporting: string;
+  writingDraftNoAnswer: string;
+  writingDraftEmpty: string;
+  writingDraftExported: (papers: number, unresolved: number) => string;
+  writingDraftExportedAndCopied: (papers: number, unresolved: number) => string;
+  writingDraftExportFailed: string;
   cancelled: string;
   retry: string;
   branchToNewChat: string;
@@ -251,6 +289,8 @@ export type PanelI18n = {
   noPapersMatched: string;
   pdfCount: (count: number) => string;
   pdfAttachment: string;
+  pageAnchorOpening: (label: string) => string;
+  pageAnchorUnavailable: string;
   trLogFullPath: string;
   trLogOutputFormat: (mono: boolean, dual: boolean) => string;
   trLogResolvingCredentials: string;
@@ -3874,6 +3914,66 @@ export function getPanelI18n(): PanelI18n {
       paperContextBatchAdded: (added, skipped) =>
         `Added ${added} paper(s)${skipped ? `, skipped ${skipped}` : ""}`,
       paperContextAdded: (n, max) => `Paper context added (${n}/${max})`,
+      addMyAnnotations: "Add my annotations",
+      summarizeMyAnnotations: "Summarize my annotations",
+      annotationContextLabel: (count) => `Annotations (${count})`,
+      annotationContextAdded: (count) =>
+        `Added ${count} annotation${count === 1 ? "" : "s"} as context`,
+      annotationContextTruncated: (included, total) =>
+        `Annotation context truncated: sending the first ${included} of ${total}`,
+      annotationContextNone:
+        "This document has no highlights, underlines, or notes yet",
+      annotationContextUnavailable:
+        "No attachment to read annotations from. Open a PDF or select an item with one.",
+      annotationContextCleared: "Annotation context removed",
+      clearAnnotationContext: "Remove annotation context",
+      annotationSummaryPromptFailed:
+        "Could not load the annotation summary prompt",
+      generateReadingCard: "Generate reading card",
+      readingCardPromptFailed: "Could not load the reading card template",
+      readingCardNoDocument:
+        "No readable PDF or EPUB for this item. Open one or select an item that has one.",
+      readingCardSending: "Generating the reading card...",
+      extractConceptCards: "Extract concept cards",
+      recordConceptCard: "Record a concept...",
+      exportGlossary: "Export glossary",
+      conceptPromptFailed: "Could not load the concept card template",
+      conceptNoDocument:
+        "No readable PDF or EPUB for this item. Open one or select an item that has one.",
+      conceptExtractSending: "Extracting concept cards...",
+      conceptDefineSending: (term) => `Defining "${term}"...`,
+      conceptTermMissing:
+        "Type a term in the composer, or select one in the reader, first",
+      conceptParseFailed: "No concept card could be read from that answer",
+      conceptStoreFailed: "Could not save the concept cards",
+      conceptCardsStored: (created, skipped) =>
+        `Saved ${created} concept card${created === 1 ? "" : "s"}${
+          skipped ? ` (${skipped} already known)` : ""
+        }`,
+      conceptRecallStatus: (count) =>
+        `Using ${count} concept card${count === 1 ? "" : "s"}`,
+      glossaryExporting: "Building the glossary...",
+      glossaryEmpty:
+        "No concept cards yet. Use “Extract concept cards” on a paper first.",
+      glossaryExported: (count) =>
+        `Glossary saved as a note (${count} term${count === 1 ? "" : "s"})`,
+      glossaryExportedAndCopied: (count) =>
+        `Glossary saved as a note and copied (${count} term${count === 1 ? "" : "s"})`,
+      glossaryExportFailed: "Could not export the glossary",
+      exportWritingDraft: "Export writing draft",
+      writingDraftExporting: "Building the writing draft...",
+      writingDraftNoAnswer:
+        "No answer to export yet. Ask a question about your papers first.",
+      writingDraftEmpty: "That answer has no text to export",
+      writingDraftExported: (papers, unresolved) =>
+        `Draft saved as a note (${papers} reference${papers === 1 ? "" : "s"}${
+          unresolved ? `, ${unresolved} citation(s) unresolved` : ""
+        })`,
+      writingDraftExportedAndCopied: (papers, unresolved) =>
+        `Draft saved as a note and copied (${papers} reference${
+          papers === 1 ? "" : "s"
+        }${unresolved ? `, ${unresolved} citation(s) unresolved` : ""})`,
+      writingDraftExportFailed: "Could not export the writing draft",
       cancelled: "Cancelled",
       retry: "Retry",
       branchToNewChat: "Branch to new chat",
@@ -4099,6 +4199,8 @@ export function getPanelI18n(): PanelI18n {
       noPapersMatched: "No papers matched.",
       pdfCount: (count) => `${count} PDFs`,
       pdfAttachment: "PDF attachment",
+      pageAnchorOpening: (label) => `Opening ${label}`,
+      pageAnchorUnavailable: "Cannot locate the cited page in this library",
       trLogFullPath: "Full path",
       trLogOutputFormat: (mono, dual) =>
         `Output format: Mono=${mono} | Dual=${dual}`,
@@ -4178,6 +4280,56 @@ export function getPanelI18n(): PanelI18n {
     paperContextBatchAdded: (added, skipped) =>
       `已添加 ${added} 篇文献${skipped ? `，跳过 ${skipped} 篇` : ""}`,
     paperContextAdded: (n, max) => `已添加论文上下文（${n}/${max}）`,
+    addMyAnnotations: "引入我的标注",
+    summarizeMyAnnotations: "汇总我的标注",
+    annotationContextLabel: (count) => `标注（${count}）`,
+    annotationContextAdded: (count) => `已引入 ${count} 条标注作为上下文`,
+    annotationContextTruncated: (included, total) =>
+      `标注过多，已截断：本次仅发送前 ${included}/${total} 条`,
+    annotationContextNone: "当前文档还没有高亮、下划线或批注",
+    annotationContextUnavailable:
+      "找不到可读取标注的附件，请打开 PDF 或选中带附件的条目",
+    annotationContextCleared: "已移除标注上下文",
+    clearAnnotationContext: "移除标注上下文",
+    annotationSummaryPromptFailed: "无法加载标注汇总提示词",
+    generateReadingCard: "生成精读卡片",
+    readingCardPromptFailed: "无法加载精读卡片模板",
+    readingCardNoDocument:
+      "该条目没有可读取的 PDF 或 EPUB，请先打开或选中带附件的条目",
+    readingCardSending: "正在生成精读卡片……",
+    extractConceptCards: "提取概念卡",
+    recordConceptCard: "记录概念……",
+    exportGlossary: "导出术语表",
+    conceptPromptFailed: "无法加载概念卡模板",
+    conceptNoDocument:
+      "该条目没有可读取的 PDF 或 EPUB，请先打开或选中带附件的条目",
+    conceptExtractSending: "正在提取概念卡……",
+    conceptDefineSending: (term) => `正在为“${term}”生成概念卡……`,
+    conceptTermMissing: "请先在输入框写下术语，或在阅读器中选中一段文字",
+    conceptParseFailed: "没能从这条回答中解析出概念卡",
+    conceptStoreFailed: "概念卡保存失败",
+    conceptCardsStored: (created, skipped) =>
+      `已存 ${created} 张概念卡${skipped ? `（${skipped} 张已存在跳过）` : ""}`,
+    conceptRecallStatus: (count) => `已引入 ${count} 张概念卡`,
+    glossaryExporting: "正在生成术语表……",
+    glossaryEmpty: "还没有概念卡，先对一篇文献用「提取概念卡」试试",
+    glossaryExported: (count) => `术语表已保存为笔记（共 ${count} 条）`,
+    glossaryExportedAndCopied: (count) =>
+      `术语表已保存为笔记并复制到剪贴板（共 ${count} 条）`,
+    glossaryExportFailed: "术语表导出失败",
+    exportWritingDraft: "导出写作草稿",
+    writingDraftExporting: "正在生成写作草稿……",
+    writingDraftNoAnswer: "还没有可导出的回答，先就你的文献提一个问题",
+    writingDraftEmpty: "这条回答没有可导出的正文",
+    writingDraftExported: (papers, unresolved) =>
+      `草稿已保存为笔记（引用 ${papers} 篇文献${
+        unresolved ? `，${unresolved} 处引用未能解析` : ""
+      }）`,
+    writingDraftExportedAndCopied: (papers, unresolved) =>
+      `草稿已保存为笔记并复制到剪贴板（引用 ${papers} 篇文献${
+        unresolved ? `，${unresolved} 处引用未能解析` : ""
+      }）`,
+    writingDraftExportFailed: "写作草稿导出失败",
     cancelled: "已取消",
     retry: "重试",
     branchToNewChat: "分支到新聊天",
@@ -4391,6 +4543,8 @@ export function getPanelI18n(): PanelI18n {
     noPapersMatched: "没有匹配的论文。",
     pdfCount: (count) => `${count} 个 PDF`,
     pdfAttachment: "PDF 附件",
+    pageAnchorOpening: (label) => `正在跳转到 ${label}`,
+    pageAnchorUnavailable: "无法在文献库中定位该引用页",
     trLogFullPath: "完整路径",
     trLogOutputFormat: (mono, dual) => `输出格式：单语=${mono} | 双语=${dual}`,
     trLogResolvingCredentials: "正在解析模型凭证...",

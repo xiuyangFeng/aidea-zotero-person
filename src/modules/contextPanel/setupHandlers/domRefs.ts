@@ -32,6 +32,14 @@ export type PanelDomRefs = {
   slashUploadOption: HTMLButtonElement | null;
   slashReferenceOption: HTMLButtonElement | null;
   slashLibraryOption: HTMLButtonElement | null;
+  slashAnnotationsOption: HTMLButtonElement | null;
+  slashAnnotationSummaryOption: HTMLButtonElement | null;
+  slashReadingCardOption: HTMLButtonElement | null;
+  slashConceptExtractOption: HTMLButtonElement | null;
+  slashConceptRecordOption: HTMLButtonElement | null;
+  slashGlossaryExportOption: HTMLButtonElement | null;
+  slashWritingDraftOption: HTMLButtonElement | null;
+  contextPreviews: HTMLDivElement | null;
   imagePreview: HTMLDivElement | null;
   selectedContextList: HTMLDivElement | null;
   previewStrip: HTMLDivElement | null;
@@ -160,6 +168,30 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     slashLibraryOption: body.querySelector(
       "#llm-slash-library-option",
     ) as HTMLButtonElement | null,
+    slashAnnotationsOption: body.querySelector(
+      "#llm-slash-annotations-option",
+    ) as HTMLButtonElement | null,
+    slashAnnotationSummaryOption: body.querySelector(
+      "#llm-slash-annotation-summary-option",
+    ) as HTMLButtonElement | null,
+    slashReadingCardOption: body.querySelector(
+      "#llm-slash-reading-card-option",
+    ) as HTMLButtonElement | null,
+    slashConceptExtractOption: body.querySelector(
+      "#llm-slash-concept-extract-option",
+    ) as HTMLButtonElement | null,
+    slashConceptRecordOption: body.querySelector(
+      "#llm-slash-concept-record-option",
+    ) as HTMLButtonElement | null,
+    slashGlossaryExportOption: body.querySelector(
+      "#llm-slash-glossary-export-option",
+    ) as HTMLButtonElement | null,
+    slashWritingDraftOption: body.querySelector(
+      "#llm-slash-writing-draft-option",
+    ) as HTMLButtonElement | null,
+    contextPreviews: body.querySelector(
+      "#llm-context-previews",
+    ) as HTMLDivElement | null,
     imagePreview: body.querySelector(
       "#llm-image-preview",
     ) as HTMLDivElement | null,

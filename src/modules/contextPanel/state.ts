@@ -1,6 +1,7 @@
 import type { ModelProfileKey } from "./constants";
 import type { DocumentKind } from "./document/types";
 import type {
+  AnnotationContextSelection,
   Message,
   DocumentTextContext,
   CustomShortcut,
@@ -199,6 +200,17 @@ export const selectedImageCache = new Map<number, string[]>();
 export const selectedFileAttachmentCache = new Map<number, ChatAttachment[]>();
 export const selectedFilePreviewExpandedCache = new Map<number, boolean>();
 export const selectedPaperContextCache = new Map<number, PaperContextRef[]>();
+/**
+ * Annotations pinned into the composer, keyed by panel item id.
+ *
+ * Session-only by design: annotations are cheap to re-read from Zotero and
+ * change whenever the user marks up the document, so a restored stale copy
+ * would be worse than reading them again.
+ */
+export const selectedAnnotationContextCache = new Map<
+  number,
+  AnnotationContextSelection
+>();
 export const selectedPaperPreviewExpandedCache = new Map<number, boolean>();
 export const activeGlobalConversationByLibrary = new Map<number, number>();
 export const activeConversationModeByLibrary = new Map<

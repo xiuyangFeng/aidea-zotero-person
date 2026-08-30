@@ -1,5 +1,6 @@
 import { createElement } from "../../utils/domHelpers";
 import {
+  ANNOTATION_SUMMARY_SHORTCUT_FILE,
   AUTO_SCROLL_BOTTOM_THRESHOLD,
   INLINE_CONTEXT_COLLAPSE_THRESHOLD,
   MAX_SELECTED_IMAGES,
@@ -18,6 +19,8 @@ import {
   ACTION_LAYOUT_MODEL_WRAP_MIN_CHARS,
   ACTION_LAYOUT_MODEL_FULL_MAX_LINES,
   MODEL_PROFILE_ORDER,
+  CONCEPT_CARDS_SHORTCUT_FILE,
+  READING_CARD_SHORTCUT_FILE,
   GLOBAL_HISTORY_LIMIT,
   PAPER_CONVERSATION_KEY_BASE,
   PAPER_HISTORY_LIMIT,
@@ -34,6 +37,7 @@ import {
   selectedFilePreviewExpandedCache,
   selectedPaperContextCache,
   selectedPaperPreviewExpandedCache,
+  selectedAnnotationContextCache,
   cancelPanelRequest,
   isPanelGenerating,
   panelFontScalePercent,
@@ -49,6 +53,7 @@ import {
   conversationContextPool,
   draftInputCache,
   activePaperConversationByItem,
+  pdfTextCache,
 } from "./state";
 import {
   sanitizeText,
@@ -57,8 +62,10 @@ import {
   buildQuestionWithSelectedTextContexts,
   buildModelPromptWithFileContext,
   resolvePromptText,
+  DEFAULT_ANNOTATION_ANALYSIS_PROMPT,
   getSelectedTextWithinBubble,
   getAttachmentTypeLabel,
+  getCurrentLocalTimestamp,
   normalizeSelectedTextSource,
 } from "./textUtils";
 import { normalizeSelectedTextPaperContexts } from "./normalizers";
@@ -91,6 +98,8 @@ import {
   persistChatScrollSnapshot,
   isScrollUpdateSuspended,
   withScrollGuard,
+  claimNextAssistantTurn,
+  releaseAssistantTurnClaim,
   copyTextToClipboard,
   copyRenderedMarkdownToClipboard,
   exportGeneratedImageDataUrl,
@@ -121,13 +130,71 @@ import {
   resolvePaperContextRefFromAttachment,
   resolvePaperContextRefFromLibraryItem,
 } from "./paperAttribution";
-import { getReaderDocumentCapabilities } from "./documentContext";
+import {
+  buildOpenPdfUrlForAttachment,
+  buildPageAnchorScope,
+  navigateToPageAnchor,
+} from "./pageAnchorTargets";
+import {
+  formatPageAnchorLabel,
+  isPageAnchorsEnabled,
+  normalizePageAnchor,
+} from "../../utils/pageAnchors";
+import {
+  READING_CARD_FOCUS_PREF_KEY,
+  READING_CARD_NOTE_TAG,
+  READING_CARD_TEMPLATE_PREF_KEY,
+  buildReadingCardPrompt,
+  isReadingCardText,
+  resolveReadingCardPageCitations,
+} from "../../utils/readingCard";
+import {
+  CONCEPT_GLOSSARY_NOTE_TAG,
+  CONCEPT_TERM_MAX_CHARS,
+  buildConceptDefinitionPrompt,
+  buildConceptExtractionPrompt,
+  buildGlossaryMarkdown,
+  normalizeConceptTerm,
+  parseConceptCards,
+  sortConceptsForGlossary,
+} from "../../utils/conceptCards";
+import {
+  listConceptCards,
+  resolveConceptLibraryID,
+  storeConceptCards,
+} from "../../utils/conceptStore";
+import {
+  WRITING_DRAFT_NOTE_TAG,
+  getWritingCitationStylePreference,
+  resolveWritingCitationStyle,
+} from "../../utils/writingExport";
+import {
+  buildWritingDraftForMessage,
+  findLatestAssistantMessage,
+  isBetterBibTeXAvailable,
+} from "./writingExport";
+import {
+  collectAnnotationSource,
+  type AnnotationSource,
+} from "./annotationSources";
+import {
+  buildAnnotationContextBlock,
+  buildModelPromptWithAnnotationContext,
+  countAnnotationsByType,
+} from "../../utils/annotationContext";
+import { loadShortcutText } from "./shortcuts";
+import {
+  getReaderDocumentCapabilities,
+  resolveReaderDocument,
+  type ReaderDocument,
+} from "./documentContext";
 import { getDocumentAdapterForItem } from "./document/registry";
 import { captureScreenshotSelection, optimizeImageDataUrl } from "./screenshot";
 import {
   createNoteFromAssistantText,
   createNoteFromChatHistory,
   createStandaloneNoteFromChatHistory,
+  createStandaloneNoteFromMarkdown,
   buildChatHistoryNotePayload,
 } from "./notes";
 import {
@@ -182,7 +249,7 @@ import {
 import { getLibrarySelectedItemIdsFromWindow } from "./librarySelection";
 import { getZoteroItem } from "../../utils/zoteroItems";
 import { getPanelDomRefs } from "./setupHandlers/domRefs";
-import { getPanelI18n } from "./i18n";
+import { getPanelI18n, getPanelLang } from "./i18n";
 import { pickChatInputPlaceholder } from "./placeholderTips";
 import {
   MODEL_MENU_OPEN_CLASS,
@@ -245,10 +312,27 @@ import { addManagedListener, resetManagedListeners } from "./managedListeners";
 
 const SETTING_TAB_RENDER_VERSION = "2026-06-01-font-theme-layout";
 
+/**
+ * Tag options for saving an answer as a note.
+ *
+ * Only reading cards are tagged, so the tag keeps meaning a card and a Zotero
+ * saved search on it stays clean. Recognition is content-based — see
+ * `isReadingCardText`.
+ */
+function resolveAssistantNoteTags(
+  text: string,
+): { tags: string[] } | undefined {
+  return isReadingCardText(text)
+    ? { tags: [READING_CARD_NOTE_TAG] }
+    : undefined;
+}
+
 export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   // Re-bootstrap on a persistent host must dispose the document/window-level
   // listeners registered by the previous run before registering new ones.
   resetManagedListeners(body);
+  // A claim staked by the previous run would fire into disposed closures.
+  releaseAssistantTurnClaim();
   const addDocScopedListener = (
     target: EventTarget | null | undefined,
     type: string,
@@ -343,6 +427,14 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashUploadOption,
     slashReferenceOption,
     slashLibraryOption,
+    slashAnnotationsOption,
+    slashAnnotationSummaryOption,
+    slashReadingCardOption,
+    slashConceptExtractOption,
+    slashConceptRecordOption,
+    slashGlossaryExportOption,
+    slashWritingDraftOption,
+    contextPreviews,
     imagePreview,
     selectedContextList,
     previewStrip,
@@ -1023,7 +1115,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         // (for rich-text paste into Zotero notes) and plain text
         // (for plain-text editors).  Uses the selection if present,
         // otherwise the full response.
-        await copyRenderedMarkdownToClipboard(body, target.contentText);
+        await copyRenderedMarkdownToClipboard(body, target.contentText, {
+          item: target.item,
+        });
         if (status) setStatus(status, getPanelI18n().copiedResponse, "ready");
       });
       responseMenuNoteBtn.addEventListener("click", async (e: Event) => {
@@ -1048,14 +1142,19 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
               Number.isFinite(targetItem.libraryID) && targetItem.libraryID > 0
                 ? Math.floor(targetItem.libraryID)
                 : getCurrentLibraryID();
-            await createStandaloneNoteFromChatHistory(libraryID, [
-              {
-                role: "assistant",
-                text: contentText,
-                timestamp: Date.now(),
-                modelName,
-              },
-            ]);
+            await createStandaloneNoteFromChatHistory(
+              libraryID,
+              [
+                {
+                  role: "assistant",
+                  text: contentText,
+                  timestamp: Date.now(),
+                  modelName,
+                },
+              ],
+              { item: targetItem },
+              resolveAssistantNoteTags(contentText),
+            );
             if (status) {
               setStatus(status, getPanelI18n().createdNewNote, "ready");
             }
@@ -1065,6 +1164,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
             targetItem,
             contentText,
             modelName,
+            resolveAssistantNoteTags(contentText),
           );
           if (status) {
             setStatus(
@@ -1333,6 +1433,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
             await createStandaloneNoteFromChatHistory(
               currentLibraryID,
               history,
+              { item: currentItem },
             );
           } else {
             await createNoteFromChatHistory(currentItem, history);
@@ -1414,6 +1515,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     setSelectedTextContexts(itemId, []);
     setSelectedTextExpandedIndex(itemId, null);
   };
+
+  const clearSelectedAnnotationState = (itemId: number) => {
+    selectedAnnotationContextCache.delete(itemId);
+  };
+
   const clearTransientComposeStateForItem = (
     itemId: number,
     textContextKey: number = itemId,
@@ -1422,6 +1528,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     clearSelectedPaperState(itemId);
     clearSelectedFileState(itemId);
     clearSelectedTextState(textContextKey);
+    clearSelectedAnnotationState(itemId);
   };
   const runWithChatScrollGuard = (fn: () => void) => {
     withScrollGuard(chatBox, conversationKey, fn);
@@ -2682,6 +2789,94 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     positionExpandedContextPanels();
     if (composeHook.save) composeHook.save();
   };
+
+  // The annotation chip is a single inline element rather than a card: there
+  // is at most one annotation set per conversation, so it needs no expansion
+  // surface — only a label and a remove button.
+  let inlineAnnotationChip: HTMLElement | null = null;
+
+  const updateAnnotationPreview = () => {
+    const hadChip = Boolean(inlineAnnotationChip);
+    if (inlineAnnotationChip) {
+      inlineAnnotationChip.remove();
+      inlineAnnotationChip = null;
+    }
+    const host = contextPreviews || filePreview?.parentElement;
+    const ownerDoc = body.ownerDocument;
+    const selection = item
+      ? selectedAnnotationContextCache.get(item.id)
+      : undefined;
+    if (!item || !host || !ownerDoc || !selection?.records.length) {
+      // Removing the chip changes the composer's height, so the fixed overlays
+      // anchored to it still need a reposition.
+      if (hadChip) positionExpandedContextPanels();
+      return;
+    }
+
+    const i18nLabels = getPanelI18n();
+    const counts = countAnnotationsByType(selection.records);
+    const chip = createElement(
+      ownerDoc,
+      "div",
+      "llm-selected-context llm-paper-context-chip llm-file-chip-inline llm-annotation-context-chip",
+    );
+    chip.classList.add("collapsed");
+    const chipHeader = createElement(
+      ownerDoc,
+      "div",
+      "llm-image-preview-header llm-selected-context-header llm-paper-context-chip-header",
+    );
+    const chipLabel = createElement(
+      ownerDoc,
+      "span",
+      "llm-paper-context-chip-label",
+      {
+        textContent: i18nLabels.annotationContextLabel(
+          selection.records.length,
+        ),
+        title: [
+          selection.title,
+          `highlight ${counts.highlight} · underline ${counts.underline} · note ${counts.note}`,
+        ]
+          .filter(Boolean)
+          .join(" — "),
+      },
+    );
+    chipHeader.append(chipLabel);
+
+    // Its own clear class: the paper-context handlers delegate on
+    // `.llm-paper-context-clear`, and this chip must never be caught by them.
+    const removeBtn = createElement(
+      ownerDoc,
+      "button",
+      "llm-remove-img-btn llm-annotation-context-clear",
+      {
+        type: "button",
+        textContent: "×",
+        title: i18nLabels.clearAnnotationContext,
+      },
+    ) as HTMLButtonElement;
+    removeBtn.setAttribute("aria-label", i18nLabels.clearAnnotationContext);
+    removeBtn.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item) return;
+      clearSelectedAnnotationState(item.id);
+      updateAnnotationPreview();
+      if (status) {
+        setStatus(status, getPanelI18n().annotationContextCleared, "ready");
+      }
+    });
+    chipHeader.append(removeBtn);
+    chip.append(chipHeader);
+
+    // Pinned ahead of the other previews so the reader's own marks stay the
+    // first thing the composer shows.
+    host.insertBefore(chip, host.firstChild);
+    inlineAnnotationChip = chip;
+    positionExpandedContextPanels();
+  };
+
   const updatePaperPreviewPreservingScroll = () => {
     runWithChatScrollGuard(() => {
       updatePaperPreview();
@@ -2700,6 +2895,11 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const updateSelectedTextPreviewPreservingScroll = () => {
     runWithChatScrollGuard(() => {
       updateSelectedTextPreview();
+    });
+  };
+  const updateAnnotationPreviewPreservingScroll = () => {
+    runWithChatScrollGuard(() => {
+      updateAnnotationPreview();
     });
   };
   const refreshChatPreservingScroll = () => {
@@ -3172,6 +3372,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     updateFilePreviewPreservingScroll();
     updateImagePreviewPreservingScroll();
     updateSelectedTextPreviewPreservingScroll();
+    updateAnnotationPreviewPreservingScroll();
   };
 
   const switchGlobalConversation = async (nextConversationKey: number) => {
@@ -5299,6 +5500,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   updateFilePreviewPreservingScroll();
   updateImagePreviewPreservingScroll();
   updateSelectedTextPreviewPreservingScroll();
+  updateAnnotationPreviewPreservingScroll();
   syncModelFromPrefs();
   void refreshGlobalHistoryHeader();
 
@@ -6418,6 +6620,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     resolvePromptText,
     buildQuestionWithSelectedTextContexts,
     buildModelPromptWithFileContext,
+    getAnnotationContext: (itemId) =>
+      selectedAnnotationContextCache.get(itemId) || null,
+    buildModelPromptWithAnnotationContext: (question, selection) =>
+      buildModelPromptWithAnnotationContext(
+        question,
+        selection?.records || [],
+        {
+          title: selection?.title,
+        },
+      ),
+    annotationOnlyPromptText: DEFAULT_ANNOTATION_ANALYSIS_PROMPT,
     isGlobalMode,
     normalizeConversationTitleSeed,
     getConversationKey,
@@ -6969,6 +7182,601 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
+  /**
+   * Locate the document whose annotations this panel should read.
+   *
+   * A reader panel already holds the attachment. Library and global panels
+   * hold a regular item or a portal placeholder, so the items-tree selection
+   * is the fallback — the same source the "add selected items" action uses.
+   */
+  const resolveAnnotationSourceForPanel = (): AnnotationSource | null => {
+    if (item && !isGlobalPortalItem(item)) {
+      const direct = collectAnnotationSource(item);
+      if (direct) return direct;
+    }
+    const win = body.ownerDocument?.defaultView;
+    for (const selectedId of getLibrarySelectedItemIdsFromWindow(win)) {
+      const source = collectAnnotationSource(getZoteroItem(selectedId));
+      if (source) return source;
+    }
+    return null;
+  };
+
+  /**
+   * Pin the reader's own highlights, underlines, and notes as chat context.
+   * Returns false when nothing could be pinned, so the summary action can stop
+   * before spending a request on an empty document.
+   */
+  const addAnnotationContext = (): boolean => {
+    if (!item) return false;
+    const labels = getPanelI18n();
+    const source = resolveAnnotationSourceForPanel();
+    if (!source) {
+      if (status) {
+        setStatus(status, labels.annotationContextUnavailable, "warning");
+      }
+      return false;
+    }
+    if (!source.records.length) {
+      // Drop a stale pin so the chip never outlives the annotations it names.
+      clearSelectedAnnotationState(item.id);
+      updateAnnotationPreviewPreservingScroll();
+      if (status) setStatus(status, labels.annotationContextNone, "warning");
+      return false;
+    }
+
+    selectedAnnotationContextCache.set(item.id, {
+      attachmentId: source.attachmentId,
+      title: source.title,
+      records: source.records,
+    });
+    updateAnnotationPreviewPreservingScroll();
+
+    // Report truncation up front: the user should learn the budget was hit
+    // when pinning, not by noticing a missing page in the answer.
+    const block = buildAnnotationContextBlock(source.records, {
+      title: source.title,
+    });
+    if (status) {
+      setStatus(
+        status,
+        block.truncated
+          ? labels.annotationContextTruncated(
+              block.includedCount,
+              block.totalCount,
+            )
+          : labels.annotationContextAdded(source.records.length),
+        block.truncated ? "warning" : "ready",
+      );
+    }
+    return true;
+  };
+
+  if (slashAnnotationsOption) {
+    slashAnnotationsOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      if (addAnnotationContext()) {
+        inputBox.focus({ preventScroll: true });
+      }
+    });
+  }
+
+  /**
+   * Built-in "summarize my annotations" action.
+   *
+   * It pins the annotations, then drives the normal send path with a prompt
+   * loaded from the shortcut files. The prompt file is deliberately not
+   * registered as a shortcut button, so this action costs no editable slot.
+   */
+  const summarizeAnnotations = async () => {
+    if (!item) return;
+    if (!addAnnotationContext()) return;
+    let prompt = "";
+    try {
+      prompt = (
+        await loadShortcutText(ANNOTATION_SUMMARY_SHORTCUT_FILE)
+      ).trim();
+    } catch (err) {
+      ztoolkit.log("LLM: failed to load annotation summary prompt", err);
+    }
+    if (!prompt) {
+      if (status) {
+        setStatus(
+          status,
+          getPanelI18n().annotationSummaryPromptFailed,
+          "error",
+        );
+      }
+      return;
+    }
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  if (slashAnnotationSummaryOption) {
+    slashAnnotationSummaryOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void summarizeAnnotations();
+    });
+  }
+
+  /**
+   * Find the document a reading card should be written about.
+   *
+   * A reader panel holds the attachment itself, so the send flow resolves it
+   * as base document context without help. A library or global panel holds a
+   * regular item or a portal placeholder, which never becomes base context —
+   * there the document has to be pinned as paper context first, which is what
+   * `pinItem` reports.
+   */
+  const resolveReadingCardDocument = (): {
+    document: ReaderDocument;
+    pinItem: Zotero.Item | null;
+  } | null => {
+    const panelItem = item && !isGlobalPortalItem(item) ? item : null;
+    if (panelItem && getReaderDocumentCapabilities(panelItem)?.panelChat) {
+      const direct = resolveReaderDocument(panelItem);
+      if (direct) return { document: direct, pinItem: null };
+    }
+    const win = body.ownerDocument?.defaultView;
+    const candidates: Array<Zotero.Item | null> = [panelItem];
+    for (const selectedId of getLibrarySelectedItemIdsFromWindow(win)) {
+      candidates.push(getZoteroItem(selectedId));
+    }
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const document = resolveReaderDocument(candidate);
+      if (document) return { document, pinItem: candidate };
+    }
+    return null;
+  };
+
+  /**
+   * Whether the card may ask for [p.N] citations.
+   *
+   * Only PDFs carry `[page N]` markers, and even a PDF loses them when the
+   * user turned page anchors off. Already-extracted text is consulted first so
+   * a marker-less extraction relaxes the rule instead of inviting guesses.
+   */
+  const resolveReadingCardCitationMode = (
+    document: ReaderDocument,
+  ): boolean => {
+    const cached = pdfTextCache.get(document.item.id);
+    return resolveReadingCardPageCitations({
+      documentKind: document.kind,
+      pageAnchorsEnabled: isPageAnchorsEnabled(),
+      contextSample: (cached?.chunks || []).slice(0, 3).join("\n"),
+    });
+  };
+
+  /**
+   * Built-in "generate reading card" action.
+   *
+   * Like the annotation summary it drives the normal send path: assemble the
+   * prompt, drop it in the composer, and let the answer arrive as an ordinary
+   * assistant message that "Save as note" can write back.
+   */
+  const generateReadingCard = async () => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    const resolved = resolveReadingCardDocument();
+    if (!resolved) {
+      if (status) setStatus(status, labels.readingCardNoDocument, "warning");
+      return;
+    }
+    if (resolved.pinItem) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(resolved.pinItem);
+      if (paperRef) upsertPaperContext(paperRef, { silent: true });
+    }
+    // Loading the template can hit the filesystem on first use, so the status
+    // goes up before the await rather than after it.
+    if (status) setStatus(status, labels.readingCardSending, "sending");
+
+    let builtinTemplate = "";
+    try {
+      builtinTemplate = (
+        await loadShortcutText(READING_CARD_SHORTCUT_FILE)
+      ).trim();
+    } catch (err) {
+      ztoolkit.log("LLM: failed to load reading card template", err);
+    }
+    const customTemplate = getStringPref(READING_CARD_TEMPLATE_PREF_KEY).trim();
+    if (!builtinTemplate && !customTemplate) {
+      if (status) setStatus(status, labels.readingCardPromptFailed, "error");
+      return;
+    }
+
+    const prompt = buildReadingCardPrompt({
+      builtinTemplate,
+      customTemplate,
+      researchFocus: getStringPref(READING_CARD_FOCUS_PREF_KEY),
+      pageCitations: resolveReadingCardCitationMode(resolved.document),
+      lang: getPanelLang(),
+    });
+    if (!prompt) {
+      if (status) setStatus(status, labels.readingCardPromptFailed, "error");
+      return;
+    }
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  if (slashReadingCardOption) {
+    slashReadingCardOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void generateReadingCard();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Concept cards — a cross-paper glossary built from the reading
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Provenance stamped onto the cards of one extraction.
+   *
+   * The attachment id is what a page link needs, and the paper title is
+   * denormalized so a glossary stays readable after the file is gone.
+   */
+  const resolveConceptSource = (
+    document?: ReaderDocument | null,
+  ): { attachmentId: number | null; title: string } => {
+    const target = document || resolveReadingCardDocument()?.document || null;
+    if (!target) return { attachmentId: null, title: "" };
+    const ref = resolvePaperContextRefFromAttachment(target.item);
+    return {
+      attachmentId: ref?.contextItemId ?? null,
+      title: ref?.title || "",
+    };
+  };
+
+  /**
+   * Parse a finished answer into cards and write them.
+   *
+   * Shape-checked rather than trusted: a claimed turn that never ran leaves
+   * the claim standing, so an unrelated answer can reach this handler. Such an
+   * answer simply parses to nothing and is reported as such.
+   */
+  const storeConceptCardsFromAnswer = async (
+    text: string,
+    source: { attachmentId: number | null; title: string },
+    contextItem: Zotero.Item,
+  ) => {
+    const labels = getPanelI18n();
+    const drafts = parseConceptCards(text);
+    if (!drafts.length) {
+      if (status) setStatus(status, labels.conceptParseFailed, "warning");
+      return;
+    }
+    const libraryID = resolveConceptLibraryID(contextItem);
+    if (!libraryID) {
+      if (status) setStatus(status, labels.conceptStoreFailed, "error");
+      return;
+    }
+    try {
+      const result = await storeConceptCards({
+        libraryID,
+        cards: drafts,
+        sourceItemId: source.attachmentId,
+        sourceTitle: source.title,
+      });
+      if (status) {
+        setStatus(
+          status,
+          labels.conceptCardsStored(result.created, result.skipped),
+          "ready",
+        );
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: failed to store concept cards", err);
+      if (status) setStatus(status, labels.conceptStoreFailed, "error");
+    }
+  };
+
+  /**
+   * Drive the normal send path and keep the answer.
+   *
+   * Both concept entry points work the same way as the reading card — drop a
+   * prompt in the composer and click send — with a claim on the resulting turn
+   * so the cards can be filed without the user doing anything else.
+   */
+  const sendConceptPrompt = (
+    prompt: string,
+    source: { attachmentId: number | null; title: string },
+  ) => {
+    if (!item) return;
+    claimNextAssistantTurn((result) => {
+      if (result.outcome !== "ok") return;
+      void storeConceptCardsFromAnswer(result.text, source, result.item);
+    });
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  /** Built-in "extract concept cards" action. */
+  const extractConceptCards = async () => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const resolved = resolveReadingCardDocument();
+    if (!resolved) {
+      if (status) setStatus(status, labels.conceptNoDocument, "warning");
+      return;
+    }
+    if (resolved.pinItem) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(resolved.pinItem);
+      if (paperRef) upsertPaperContext(paperRef, { silent: true });
+    }
+    if (status) setStatus(status, labels.conceptExtractSending, "sending");
+
+    let builtinTemplate = "";
+    try {
+      builtinTemplate = (
+        await loadShortcutText(CONCEPT_CARDS_SHORTCUT_FILE)
+      ).trim();
+    } catch (err) {
+      ztoolkit.log("LLM: failed to load concept card template", err);
+    }
+    if (!builtinTemplate) {
+      if (status) setStatus(status, labels.conceptPromptFailed, "error");
+      return;
+    }
+    const prompt = buildConceptExtractionPrompt({
+      builtinTemplate,
+      lang: getPanelLang(),
+      pageCitations: resolveReadingCardCitationMode(resolved.document),
+    });
+    if (!prompt) {
+      if (status) setStatus(status, labels.conceptPromptFailed, "error");
+      return;
+    }
+    sendConceptPrompt(prompt, resolveConceptSource(resolved.document));
+  };
+
+  /**
+   * Term the "record a concept" action should define.
+   *
+   * The composer wins because typing the term is the explicit gesture; a
+   * reader selection comes next, which covers looking a term up while reading
+   * without adding anything to the selection popup; pinned text is the last
+   * fallback for a term dragged in earlier. A candidate longer than a term can
+   * be is a passage, not a term, and is passed over rather than sent.
+   */
+  const resolveConceptTermCandidate = (): string => {
+    const conversationKey = item ? getConversationKey(item) : 0;
+    const candidates = [
+      inputBox.value,
+      getActiveReaderSelectionText(body.ownerDocument as Document, item),
+      conversationKey > 0
+        ? getSelectedTextContextEntries(conversationKey)[0]?.text
+        : "",
+    ];
+    for (const candidate of candidates) {
+      const term = normalizeConceptTerm(candidate);
+      if (term && term.length <= CONCEPT_TERM_MAX_CHARS) return term;
+    }
+    return "";
+  };
+
+  /** Built-in "record a concept" action. */
+  const recordConceptCard = () => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const term = resolveConceptTermCandidate();
+    if (!term) {
+      if (status) setStatus(status, labels.conceptTermMissing, "warning");
+      return;
+    }
+    const resolved = resolveReadingCardDocument();
+    const prompt = buildConceptDefinitionPrompt({
+      term,
+      lang: getPanelLang(),
+      pageCitations: resolved
+        ? resolveReadingCardCitationMode(resolved.document)
+        : false,
+    });
+    if (!prompt) {
+      if (status) setStatus(status, labels.conceptTermMissing, "warning");
+      return;
+    }
+    if (status) setStatus(status, labels.conceptDefineSending(term), "sending");
+    sendConceptPrompt(prompt, resolveConceptSource());
+  };
+
+  /**
+   * Built-in "export glossary" action.
+   *
+   * Writes one standalone note and copies the same Markdown, so the glossary
+   * is both filed in Zotero and ready to paste elsewhere from a single menu
+   * entry.
+   */
+  const exportGlossary = async () => {
+    const labels = getPanelI18n();
+    const libraryID = resolveConceptLibraryID(item);
+    if (!libraryID) {
+      if (status) setStatus(status, labels.glossaryExportFailed, "error");
+      return;
+    }
+    if (status) setStatus(status, labels.glossaryExporting, "sending");
+    try {
+      const cards = await listConceptCards(libraryID);
+      if (!cards.length) {
+        if (status) setStatus(status, labels.glossaryEmpty, "warning");
+        return;
+      }
+      const lang = getPanelLang();
+      const entries = sortConceptsForGlossary(
+        cards.map((card) => ({
+          term: card.term,
+          definition: card.definition,
+          sourceTitle: card.sourceTitle,
+          page: card.page ?? null,
+          // Only a known page can be linked; without one the URL would open
+          // the attachment at an arbitrary place.
+          sourceUrl:
+            card.sourceItemId && card.page
+              ? buildOpenPdfUrlForAttachment(card.sourceItemId, card.page)
+              : null,
+        })),
+        lang,
+      );
+      const markdown = buildGlossaryMarkdown(entries, {
+        lang,
+        generatedAt: getCurrentLocalTimestamp(),
+      });
+      if (!markdown) {
+        if (status) setStatus(status, labels.glossaryEmpty, "warning");
+        return;
+      }
+      await createStandaloneNoteFromMarkdown(libraryID, markdown, {
+        tags: [CONCEPT_GLOSSARY_NOTE_TAG],
+      });
+      let copied = true;
+      try {
+        await copyTextToClipboard(body, markdown);
+      } catch (err) {
+        ztoolkit.log("LLM: glossary clipboard copy failed", err);
+        copied = false;
+      }
+      if (status) {
+        setStatus(
+          status,
+          copied
+            ? labels.glossaryExportedAndCopied(entries.length)
+            : labels.glossaryExported(entries.length),
+          "ready",
+        );
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: glossary export failed", err);
+      if (status) setStatus(status, labels.glossaryExportFailed, "error");
+    }
+  };
+
+  if (slashConceptExtractOption) {
+    slashConceptExtractOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void extractConceptCards();
+    });
+  }
+
+  if (slashConceptRecordOption) {
+    slashConceptRecordOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      recordConceptCard();
+    });
+  }
+
+  if (slashGlossaryExportOption) {
+    slashGlossaryExportOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void exportGlossary();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Writing draft — an answer's page anchors turned into citations
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Built-in "export writing draft" action.
+   *
+   * Rewrites the newest answer's `[p.N]` / `[SN p.N]` anchors into real
+   * citations, appends the reference list, and files the result the same way
+   * the glossary export does — one standalone note plus the clipboard, so the
+   * draft is both kept and ready to paste into a manuscript.
+   */
+  const exportWritingDraft = async () => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    if (status) setStatus(status, labels.writingDraftExporting, "sending");
+    try {
+      await ensureConversationLoaded(item);
+      const conversationKey = getConversationKey(item);
+      const message = findLatestAssistantMessage(
+        chatHistory.get(conversationKey) || [],
+      );
+      if (!message) {
+        if (status) setStatus(status, labels.writingDraftNoAnswer, "warning");
+        return;
+      }
+      const libraryID = resolveConceptLibraryID(item);
+      if (!libraryID) {
+        if (status) setStatus(status, labels.writingDraftExportFailed, "error");
+        return;
+      }
+      const draft = buildWritingDraftForMessage({
+        message,
+        style: resolveWritingCitationStyle(
+          getWritingCitationStylePreference(),
+          isBetterBibTeXAvailable(),
+        ),
+        lang: getPanelLang(),
+        generatedAt: getCurrentLocalTimestamp(),
+        anchorScope: { item, conversationKey },
+      });
+      if (!draft.markdown) {
+        if (status) setStatus(status, labels.writingDraftEmpty, "warning");
+        return;
+      }
+      await createStandaloneNoteFromMarkdown(libraryID, draft.markdown, {
+        tags: [WRITING_DRAFT_NOTE_TAG],
+      });
+      let copied = true;
+      try {
+        await copyTextToClipboard(body, draft.markdown);
+      } catch (err) {
+        ztoolkit.log("LLM: writing draft clipboard copy failed", err);
+        copied = false;
+      }
+      if (status) {
+        const report = copied
+          ? labels.writingDraftExportedAndCopied
+          : labels.writingDraftExported;
+        setStatus(
+          status,
+          report(draft.references.length, draft.unresolvedAnchorCount),
+          "ready",
+        );
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: writing draft export failed", err);
+      if (status) setStatus(status, labels.writingDraftExportFailed, "error");
+    }
+  };
+
+  if (slashWritingDraftOption) {
+    slashWritingDraftOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSlashMenu();
+      void exportWritingDraft();
+    });
+  }
+
   const openModelMenu = () => {
     if (!modelMenu || !modelBtn) return;
     closeSlashMenu();
@@ -7268,8 +8076,62 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     await switchPaperConversation(targetKey);
   };
 
+  /**
+   * Jump the reader to the page a `[p.12]` chip cites. The chip belongs to an
+   * assistant bubble, so the anchor is resolved against the context refs of
+   * the turn that produced it.
+   */
+  const openPageAnchorTarget = (anchorEl: HTMLElement) => {
+    const anchor = normalizePageAnchor({
+      sourceId: anchorEl.dataset.anchorSource,
+      page: anchorEl.dataset.anchorPage,
+      endPage: anchorEl.dataset.anchorPageEnd,
+    });
+    if (!anchor || !item) return;
+    const wrapper = anchorEl.closest(
+      ".llm-message-wrapper",
+    ) as HTMLElement | null;
+    const rawMessageId = Number(wrapper?.dataset.messageId || "");
+    const scope = buildPageAnchorScope({
+      item,
+      conversationKey: getConversationKey(item),
+      messageId: Number.isFinite(rawMessageId) ? rawMessageId : null,
+    });
+    const navigated = navigateToPageAnchor(scope, anchor);
+    if (!status) return;
+    setStatus(
+      status,
+      navigated
+        ? getPanelI18n().pageAnchorOpening(formatPageAnchorLabel(anchor))
+        : getPanelI18n().pageAnchorUnavailable,
+      navigated ? "ready" : "error",
+    );
+  };
+
   if (chatBox) {
+    chatBox.addEventListener("keydown", (e: Event) => {
+      const key = (e as KeyboardEvent).key;
+      if (key !== "Enter" && key !== " ") return;
+      const anchorTarget = (e.target as Element | null)?.closest(
+        ".llm-page-anchor",
+      ) as HTMLElement | null;
+      if (!anchorTarget) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openPageAnchorTarget(anchorTarget);
+    });
     chatBox.addEventListener("click", (e: Event) => {
+      // Jump to the page cited by an inline page anchor
+      const pageAnchorTarget = (e.target as Element | null)?.closest(
+        ".llm-page-anchor",
+      ) as HTMLElement | null;
+      if (pageAnchorTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        openPageAnchorTarget(pageAnchorTarget);
+        return;
+      }
+
       // Copy code block or math block content
       const blockCopyTarget = (e.target as Element | null)?.closest(
         ".llm-block-copy-btn",
@@ -7363,11 +8225,25 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           msg.modelName?.trim() || (msg.role === "user" ? "user" : "model");
         void (async () => {
           try {
+            const noteTags =
+              msg.role === "assistant"
+                ? resolveAssistantNoteTags(msg.text)
+                : undefined;
             if (isGlobalPortalItem(item)) {
               const libraryID = getCurrentLibraryID();
-              await createStandaloneNoteFromChatHistory(libraryID, [msg]);
+              await createStandaloneNoteFromChatHistory(
+                libraryID,
+                [msg],
+                { item },
+                noteTags,
+              );
             } else {
-              await createNoteFromAssistantText(item, msg.text, modelName);
+              await createNoteFromAssistantText(
+                item,
+                msg.text,
+                modelName,
+                noteTags,
+              );
             }
             if (status) setStatus(status, i18n.saveAsNote, "ready");
           } catch (err) {

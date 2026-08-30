@@ -1,0 +1,10 @@
+Write a structured reading card for this document.
+
+Output exactly the Markdown skeleton below: the same headings, in the same order, at level two, with the heading text unchanged. Do not add, drop, rename, or reorder headings, and do not nest sub-headings under them.
+
+{{FIELDS}}
+
+- Under each heading write two to five short bullets, or one tight paragraph. No sub-headings, no tables.
+- Report what the document itself says. Keep your own judgement out of every field except the last one.
+- When the document never addresses a heading, write "Not stated" under it instead of guessing.
+- Prefer the authors' own terms over paraphrase, and keep numbers exactly as reported.

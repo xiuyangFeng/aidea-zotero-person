@@ -2,6 +2,7 @@ import { MAX_SELECTED_IMAGES } from "../../constants";
 import type { ModelProfileKey } from "../../constants";
 import type {
   AdvancedModelParams,
+  AnnotationContextSelection,
   ChatAttachment,
   PaperContextRef,
   SelectedTextContext,
@@ -61,6 +62,14 @@ type SendFlowControllerDeps = {
     question: string,
     attachments: ChatAttachment[],
   ) => string;
+  /** Highlights and notes pinned into the composer, if any. */
+  getAnnotationContext: (itemId: number) => AnnotationContextSelection | null;
+  buildModelPromptWithAnnotationContext: (
+    question: string,
+    selection: AnnotationContextSelection | null,
+  ) => string;
+  /** Prompt used when annotations are the only context the user pinned. */
+  annotationOnlyPromptText: string;
   isGlobalMode: () => boolean;
   normalizeConversationTitleSeed: (raw: unknown) => string;
   getConversationKey: (item: Zotero.Item) => number;
@@ -155,12 +164,15 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const primarySelectedText = selectedTexts[0] || "";
     const selectedPaperContexts = deps.getSelectedPaperContexts(item.id);
     const selectedFiles = deps.getSelectedFiles(item.id);
+    const annotationContext = deps.getAnnotationContext(item.id);
+    const hasAnnotationContext = Boolean(annotationContext?.records.length);
 
     if (
       !text &&
       !primarySelectedText &&
       !selectedPaperContexts.length &&
-      !selectedFiles.length
+      !selectedFiles.length &&
+      !hasAnnotationContext
     ) {
       deps.setStatusMessage?.(labels.emptyPromptStatus, "warning");
       return;
@@ -169,17 +181,20 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
     const promptText = deps.resolvePromptText(
       text,
       primarySelectedText,
-      selectedFiles.length > 0 || selectedPaperContexts.length > 0,
+      selectedFiles.length > 0 ||
+        selectedPaperContexts.length > 0 ||
+        hasAnnotationContext,
     );
     if (!promptText) return;
 
-    const resolvedPromptText =
-      !text &&
-      !primarySelectedText &&
-      selectedPaperContexts.length > 0 &&
-      !selectedFiles.length
+    const hasOnlyPinnedContext = !text && !primarySelectedText;
+    const resolvedPromptText = !hasOnlyPinnedContext
+      ? promptText
+      : selectedPaperContexts.length > 0 && !selectedFiles.length
         ? "Please analyze selected papers."
-        : promptText;
+        : hasAnnotationContext && !selectedFiles.length
+          ? deps.annotationOnlyPromptText
+          : promptText;
 
     const composedQuestionBase = primarySelectedText
       ? deps.buildQuestionWithSelectedTextContexts(
@@ -193,9 +208,11 @@ export function createSendFlowController(deps: SendFlowControllerDeps): {
         )
       : resolvedPromptText;
 
-    const composedQuestion = deps.buildModelPromptWithFileContext(
-      composedQuestionBase,
-      selectedFiles,
+    // Annotations go last so the reader's own emphasis sits closest to the
+    // instruction the model reads before answering.
+    const composedQuestion = deps.buildModelPromptWithAnnotationContext(
+      deps.buildModelPromptWithFileContext(composedQuestionBase, selectedFiles),
+      annotationContext,
     );
     const displayQuestion = primarySelectedText
       ? resolvedPromptText

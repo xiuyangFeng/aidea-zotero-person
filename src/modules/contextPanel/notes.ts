@@ -1,5 +1,12 @@
-import { renderMarkdownForNote } from "../../utils/markdown";
+import {
+  renderMarkdownForNote,
+  type PageAnchorHrefResolver,
+} from "../../utils/markdown";
 import { getZoteroItem } from "../../utils/zoteroItems";
+import {
+  createPageAnchorHrefResolver,
+  type PageAnchorScopeOptions,
+} from "./pageAnchorTargets";
 import {
   sanitizeText,
   escapeNoteHtml,
@@ -14,6 +21,33 @@ import {
 import type { Message } from "./types";
 import { getPanelLang, type PanelLang } from "./i18n";
 
+/** Extra Zotero tags a caller wants on the note it is about to write. */
+export type NoteWriteOptions = {
+  tags?: readonly string[];
+};
+
+/**
+ * Attach the caller's tags to a note item.
+ *
+ * Zotero's addTag is a no-op for a tag the item already carries, so this is
+ * safe on the append path too. Tagging is a convenience for later retrieval,
+ * never a reason to fail the save.
+ */
+function applyNoteTags(
+  note: Zotero.Item,
+  options?: NoteWriteOptions | null,
+): void {
+  for (const tag of options?.tags || []) {
+    const name = String(tag || "").trim();
+    if (!name) continue;
+    try {
+      (note as any).addTag?.(name);
+    } catch (err) {
+      ztoolkit.log("LLM: failed to tag note", err);
+    }
+  }
+}
+
 function resolveParentItemForNote(item: Zotero.Item): Zotero.Item | null {
   if (item.isAttachment() && item.parentID) {
     const parent = getZoteroItem(item.parentID);
@@ -27,6 +61,7 @@ function resolveParentItemForNote(item: Zotero.Item): Zotero.Item | null {
 function buildAssistantNoteHtml(
   contentText: string,
   modelName: string,
+  pageAnchorResolver?: PageAnchorHrefResolver | null,
 ): string {
   const response = sanitizeText(contentText || "").trim();
   const source = modelName.trim() || "unknown";
@@ -35,7 +70,7 @@ function buildAssistantNoteHtml(
   try {
     // Use Zotero note-editor native math format so that note.setNote()
     // loads math correctly through ProseMirror's schema parser.
-    responseHtml = renderMarkdownForNote(response);
+    responseHtml = renderMarkdownForNote(response, { pageAnchorResolver });
   } catch (err) {
     ztoolkit.log("Note markdown render error:", err);
     responseHtml = escapeNoteHtml(response).replace(/\n/g, "<br/>");
@@ -43,12 +78,15 @@ function buildAssistantNoteHtml(
   return `<p><strong>${escapeNoteHtml(timestamp)}</strong></p><p><strong>${escapeNoteHtml(source)}:</strong></p><div>${responseHtml}</div><hr/><p>Written by AIdea plugin</p>`;
 }
 
-function renderChatMessageHtmlForNote(text: string): string {
+function renderChatMessageHtmlForNote(
+  text: string,
+  pageAnchorResolver?: PageAnchorHrefResolver | null,
+): string {
   const safeText = sanitizeText(text || "").trim();
   if (!safeText) return "";
   try {
     // Reuse the same markdown-to-note rendering path as single-response save.
-    return renderMarkdownForNote(safeText);
+    return renderMarkdownForNote(safeText, { pageAnchorResolver });
   } catch (err) {
     ztoolkit.log("Chat history markdown render error:", err);
     return escapeNoteHtml(safeText).replace(/\n/g, "<br/>");
@@ -86,7 +124,10 @@ function buildScreenshotImagesHtmlForNote(images: string[]): string {
   return `<div><p>${escapeNoteHtml(label)}</p>${blocks}</div>`;
 }
 
-export function buildChatHistoryNotePayload(messages: Message[]): {
+export function buildChatHistoryNotePayload(
+  messages: Message[],
+  anchorScope?: PageAnchorScopeOptions,
+): {
   noteHtml: string;
   noteText: string;
 } {
@@ -108,7 +149,17 @@ export function buildChatHistoryNotePayload(messages: Message[]): {
       msg.role === "user"
         ? buildScreenshotImagesHtmlForNote(screenshotImages)
         : "";
-    const rendered = renderChatMessageHtmlForNote(text);
+    // Each answer resolves its citations against the context of its own turn;
+    // user prompts never carry model-authored citations.
+    const rendered = renderChatMessageHtmlForNote(
+      text,
+      msg.role === "assistant" && anchorScope
+        ? createPageAnchorHrefResolver({
+            ...anchorScope,
+            messageId: msg.messageId ?? null,
+          })
+        : null,
+    );
     if (!rendered && !screenshotHtml) continue;
     textLines.push(`${speaker}: ${text}`);
     const renderedBlock = rendered ? `<div>${rendered}</div>` : "";
@@ -412,6 +463,7 @@ export async function createNoteFromAssistantText(
   item: Zotero.Item,
   contentText: string,
   modelName: string,
+  options?: NoteWriteOptions,
 ): Promise<"created" | "appended"> {
   const parentItem = resolveParentItemForNote(item);
   const parentId = parentItem?.id;
@@ -422,7 +474,11 @@ export async function createNoteFromAssistantText(
   // of injecting rendered DOM HTML from the bubble was fragile — KaTeX
   // span trees and sanitised classless wrappers were mostly dropped by
   // ProseMirror.)
-  const html = buildAssistantNoteHtml(contentText, modelName);
+  const html = buildAssistantNoteHtml(
+    contentText,
+    modelName,
+    createPageAnchorHrefResolver({ item }),
+  );
 
   // Try to find an existing tracked note for this parent item.
   // If one exists and is still valid, append the new content to it.
@@ -435,6 +491,7 @@ export async function createNoteFromAssistantText(
           html,
         );
         existingNote.setNote(appendedHtml);
+        applyNoteTags(existingNote, options);
         await existingNote.saveTx();
         ztoolkit.log(
           `LLM: Appended to existing note ${existingNote.id} for parent ${parentId}`,
@@ -459,6 +516,7 @@ export async function createNoteFromAssistantText(
     note.parentID = parentId;
   }
   note.setNote(html);
+  applyNoteTags(note, options);
   const saveResult = await note.saveTx();
   // saveTx() returns the new item ID (number) on creation.
   // Also check note.id as a fallback.
@@ -494,16 +552,57 @@ export async function createNoteFromChatHistory(
   if (parentId) {
     note.parentID = parentId;
   }
-  note.setNote(buildChatHistoryNotePayload(history).noteHtml);
+  note.setNote(buildChatHistoryNotePayload(history, { item }).noteHtml);
   await note.saveTx();
   ztoolkit.log(
     `LLM: Created chat history note for parent ${parentId ?? "standalone"}`,
   );
 }
 
+/**
+ * Write arbitrary Markdown as a new standalone note.
+ *
+ * Used by exports whose content is assembled by the plugin rather than taken
+ * from a conversation — the glossary, for one. It never touches the tracked
+ * assistant note, so "Save as note" keeps its own append chain.
+ */
+export async function createStandaloneNoteFromMarkdown(
+  libraryID: number,
+  markdown: string,
+  options?: NoteWriteOptions,
+): Promise<void> {
+  const normalizedLibraryID = Number.isFinite(libraryID)
+    ? Math.floor(libraryID)
+    : 0;
+  if (normalizedLibraryID <= 0) {
+    throw new Error("Invalid library ID for standalone note export");
+  }
+  const source = sanitizeText(markdown || "").trim();
+  if (!source) {
+    throw new Error("Refusing to write an empty note");
+  }
+  let html: string;
+  try {
+    html = renderMarkdownForNote(source);
+  } catch (err) {
+    ztoolkit.log("Markdown note render error:", err);
+    html = escapeNoteHtml(source).replace(/\n/g, "<br/>");
+  }
+  const note = new Zotero.Item("note");
+  note.libraryID = normalizedLibraryID;
+  note.setNote(`${html}<hr/><p>Written by AIdea plugin</p>`);
+  applyNoteTags(note, options);
+  await note.saveTx();
+  ztoolkit.log(
+    `LLM: Created standalone markdown note in library ${normalizedLibraryID}`,
+  );
+}
+
 export async function createStandaloneNoteFromChatHistory(
   libraryID: number,
   history: Message[],
+  anchorScope?: PageAnchorScopeOptions,
+  options?: NoteWriteOptions,
 ): Promise<void> {
   const normalizedLibraryID = Number.isFinite(libraryID)
     ? Math.floor(libraryID)
@@ -513,7 +612,8 @@ export async function createStandaloneNoteFromChatHistory(
   }
   const note = new Zotero.Item("note");
   note.libraryID = normalizedLibraryID;
-  note.setNote(buildChatHistoryNotePayload(history).noteHtml);
+  note.setNote(buildChatHistoryNotePayload(history, anchorScope).noteHtml);
+  applyNoteTags(note, options);
   await note.saveTx();
   ztoolkit.log(
     `LLM: Created standalone chat history note in library ${normalizedLibraryID}`,

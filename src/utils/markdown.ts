@@ -17,13 +17,23 @@
  * - Blockquotes
  * - Horizontal rules
  * - LaTeX math (via KaTeX)
+ * - Page anchors ([p.12], [S2 p.12])
  */
 
 import katex from "katex";
+import {
+  createPageAnchorPattern,
+  formatPageAnchorLabel,
+  normalizePageAnchor,
+  type PageAnchor,
+} from "./pageAnchors";
 
 // =============================================================================
 // Types
 // =============================================================================
+
+/** Turns a page anchor into a link target; return null to keep plain text. */
+export type PageAnchorHrefResolver = (anchor: PageAnchor) => string | null;
 
 export interface TextBlock {
   type:
@@ -51,6 +61,13 @@ export interface TextBlock {
  * unlike the paste handler which can transform KaTeX/MathML on the fly.
  */
 let zoteroNoteMode = false;
+
+/**
+ * Note-mode link builder for page anchors. Chat bubbles resolve their jump
+ * target lazily on click, but a saved note has to carry a real
+ * `zotero://open-pdf` href, which only the caller can supply.
+ */
+let noteModePageAnchorResolver: PageAnchorHrefResolver | null = null;
 
 // =============================================================================
 // Constants
@@ -102,6 +119,64 @@ function renderImage(src: string, alt: string, title?: string): string {
       ? ` title="${escapeAttr(title.trim())}"`
       : "";
   return `<img class="llm-markdown-image" src="${escapeAttr(safeSrc)}" alt="${escapeAttr(alt)}"${titleAttr} loading="lazy"/>`;
+}
+
+/**
+ * Chat rendering of a page anchor: a compact chip that carries everything the
+ * click handler needs to resolve an attachment and a page.
+ */
+function renderPageAnchorChip(anchor: PageAnchor): string {
+  const label = formatPageAnchorLabel(anchor);
+  const sourceAttr = anchor.sourceId
+    ? ` data-anchor-source="${escapeAttr(anchor.sourceId)}"`
+    : "";
+  const endAttr = anchor.endPage
+    ? ` data-anchor-page-end="${anchor.endPage}"`
+    : "";
+  return (
+    `<span class="llm-page-anchor" role="button" tabindex="0" data-page-anchor="1"` +
+    ` data-anchor-page="${anchor.page}"${endAttr}${sourceAttr}` +
+    ` title="${escapeAttr(label)}">${escapeHtml(label)}</span>`
+  );
+}
+
+/**
+ * Note rendering of a page anchor. Without a resolvable target the anchor is
+ * left as plain text so an exported note never shows a dead link.
+ */
+function renderPageAnchorNoteLink(anchor: PageAnchor): string | null {
+  if (!noteModePageAnchorResolver) return null;
+  let href: string;
+  try {
+    href = String(noteModePageAnchorResolver(anchor) || "").trim();
+  } catch {
+    return null;
+  }
+  if (!href) return null;
+  return `<a href="${escapeAttr(href)}">${escapeHtml(formatPageAnchorLabel(anchor))}</a>`;
+}
+
+/**
+ * Replace `[p.12]` / `[S2 p.12]` citations with their rendered form.
+ * Anything that fails to parse is returned untouched, so a malformed anchor
+ * degrades to the literal text the model produced.
+ */
+function renderPageAnchors(
+  text: string,
+  protect: (html: string) => string,
+): string {
+  if (!text.includes("[")) return text;
+  return text.replace(
+    createPageAnchorPattern(),
+    (raw: string, sourceId: string, page: string, endPage: string) => {
+      const anchor = normalizePageAnchor({ sourceId, page, endPage });
+      if (!anchor) return raw;
+      const html = zoteroNoteMode
+        ? renderPageAnchorNoteLink(anchor)
+        : renderPageAnchorChip(anchor);
+      return html ? protect(html) : raw;
+    },
+  );
 }
 
 /** Generate the copy button HTML for code/math blocks */
@@ -784,31 +859,35 @@ function renderInline(text: string): string {
     (_m, alt, src, title) => protect(renderImage(src, alt, title)),
   );
 
-  // 5. HTML escape (after protecting code, math, and images)
+  // 5. Page anchors ([p.12], [S2 p.12]) — before escaping so the emitted
+  // markup is protected, and before links so `[p.12](url)` stays a link.
+  result = renderPageAnchors(result, protect);
+
+  // 6. HTML escape (after protecting code, math, images, and page anchors)
   result = escapeHtml(result);
 
-  // 6. Bold+Italic (***...***)  - only if balanced
+  // 7. Bold+Italic (***...***)  - only if balanced
   if (hasBalancedInlineDelimiter(result, "***")) {
     result = result.replace(/\*\*\*(.+?)\*\*\*/g, (_m, inner) => {
       return protect(`<strong><em>${inner}</em></strong>`);
     });
   }
 
-  // 7. Bold (**...**) - only if balanced
+  // 8. Bold (**...**) - only if balanced
   if (hasBalancedInlineDelimiter(result, "**")) {
     result = result.replace(/\*\*(.+?)\*\*/g, (_m, inner) => {
       return protect(`<strong>${inner}</strong>`);
     });
   }
 
-  // 8. Bold (__...__) - only if balanced
+  // 9. Bold (__...__) - only if balanced
   if (hasBalancedInlineDelimiter(result, "__")) {
     result = result.replace(/__(.+?)__/g, (_m, inner) => {
       return protect(`<strong>${inner}</strong>`);
     });
   }
 
-  // 9. Italic (*...* but not inside words)
+  // 10. Italic (*...* but not inside words)
   // Only apply if there are potential matches (avoid false positives)
   result = result.replace(
     /(^|[\s(])\*([^\s*][^*]*?[^\s*])\*(?=[\s).,!?:;]|$)/g,
@@ -819,7 +898,7 @@ function renderInline(text: string): string {
     "$1<em>$2</em>",
   );
 
-  // 10. Italic (_..._ but not inside words)
+  // 11. Italic (_..._ but not inside words)
   result = result.replace(
     /(^|[\s(])_([^\s_][^_]*?[^\s_])_(?=[\s).,!?:;]|$)/g,
     "$1<em>$2</em>",
@@ -829,13 +908,13 @@ function renderInline(text: string): string {
     "$1<em>$2</em>",
   );
 
-  // 11. Links [text](url)
+  // 12. Links [text](url)
   result = result.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener">$1</a>',
   );
 
-  // 12. Restore protected blocks.
+  // 13. Restore protected blocks.
   // Reverse order is important for nested placeholders such as **$x$**:
   // bold wrapping can protect a token that itself points to rendered math.
   for (let i = protectedBlocks.length - 1; i >= 0; i--) {
@@ -891,12 +970,20 @@ export function renderMarkdown(text: string): string {
  *  `<span class="math">$…$</span>` for inline)
  * so that `note.setNote(html)` loads correctly through ProseMirror's
  * schema parser, matching what happens when the user pastes into a note.
+ *
+ * `pageAnchorResolver` turns `[p.12]` citations into `zotero://open-pdf`
+ * links; without it those citations stay plain text.
  */
-export function renderMarkdownForNote(text: string): string {
+export function renderMarkdownForNote(
+  text: string,
+  options?: { pageAnchorResolver?: PageAnchorHrefResolver | null },
+): string {
   zoteroNoteMode = true;
+  noteModePageAnchorResolver = options?.pageAnchorResolver || null;
   try {
     return renderMarkdown(text);
   } finally {
     zoteroNoteMode = false;
+    noteModePageAnchorResolver = null;
   }
 }

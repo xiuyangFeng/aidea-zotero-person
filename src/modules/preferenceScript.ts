@@ -16,6 +16,10 @@ import {
   type ProviderModelOption,
 } from "../utils/oauthCli";
 import { clearAllChatHistory } from "../utils/chatStore";
+import {
+  normalizeWritingCitationStylePreference,
+  type WritingCitationStylePreference,
+} from "../utils/writingExport";
 import { clearSelectionTranslateColdStartCache } from "../utils/selectionTranslateCacheStore";
 import {
   canonicalizeSelectedModelIds,
@@ -151,6 +155,9 @@ type PrefKey =
   | "authorProfiles.model"
   | "authorProfiles.provider"
   | "authorProfiles.language"
+  | "readingCard.template"
+  | "readingCard.researchFocus"
+  | "writingExport.citationStyle"
   | "uiLanguage";
 
 type Lang = PanelLang;
@@ -183,6 +190,14 @@ const OAUTH_ENV_UPDATE_MODE_OPTIONS: Array<{
     labelKey: "oauthEnvUpdateSilent",
     hintKey: "oauthEnvUpdateSilentHint",
   },
+];
+const WRITING_CITATION_STYLE_OPTIONS: Array<{
+  value: WritingCitationStylePreference;
+  labelKey: string;
+}> = [
+  { value: "auto", labelKey: "writingCitationStyleAuto" },
+  { value: "citekey", labelKey: "writingCitationStyleCitekey" },
+  { value: "author-year", labelKey: "writingCitationStyleAuthorYear" },
 ];
 const pref = (key: PrefKey) => `${config.prefsPrefix}.${key}`;
 const getPref = (key: PrefKey): string => {
@@ -2287,6 +2302,77 @@ const SETTINGS_I18N_TYPOGRAPHY_OVERRIDES: Partial<Record<Lang, Dict>> = {
   },
 };
 
+const SETTINGS_I18N_PAGE_ANCHOR_OVERRIDES: Partial<Record<Lang, Dict>> = {
+  "en-US": {
+    pageAnchors: "Cite page numbers in answers",
+    pageAnchorsHint:
+      "Tags PDF context with page markers and asks the model to cite them as [p.12]. Citations render as chips that jump to the page.",
+  },
+  "zh-CN": {
+    pageAnchors: "在回答中标注页码",
+    pageAnchorsHint:
+      "为 PDF 上下文注入页码标记，并要求模型以 [p.12] 形式引用。引用会渲染为可点击跳转原文的小标签。",
+  },
+};
+
+const SETTINGS_I18N_CONCEPT_CARD_OVERRIDES: Partial<Record<Lang, Dict>> = {
+  "en-US": {
+    conceptAutoRecall: "Recall concept cards automatically",
+    conceptAutoRecallHint:
+      'Looks up the glossary built by "Extract concept cards" on every message and hands the model the definitions of the terms you named. Turn it off to keep the cards without injecting them.',
+  },
+  "zh-CN": {
+    conceptAutoRecall: "自动召回概念卡",
+    conceptAutoRecallHint:
+      "每次提问时检索由「提取概念卡」积累的术语库，把你提到的术语的定义一并交给模型。关闭后概念卡仍会保留，只是不再注入。",
+  },
+};
+
+const SETTINGS_I18N_WRITING_EXPORT_OVERRIDES: Partial<Record<Lang, Dict>> = {
+  "en-US": {
+    writingCitationStyle: "Citation style for writing drafts",
+    writingCitationStyleHint:
+      'Used by "Export writing draft" in the + menu, which turns the page anchors of an answer into citations. Auto uses Better BibTeX keys when that plugin is installed and falls back to author-year otherwise.',
+    writingCitationStyleAuto: "Auto",
+    writingCitationStyleCitekey: "[@citekey]",
+    writingCitationStyleAuthorYear: "(Author, year)",
+  },
+  "zh-CN": {
+    writingCitationStyle: "写作草稿的引文格式",
+    writingCitationStyleHint:
+      "供 + 菜单里的「导出写作草稿」使用，它会把回答中的页码锚点换成真实引文。自动模式在装有 Better BibTeX 时使用 citekey，否则回退到作者-年份。",
+    writingCitationStyleAuto: "自动",
+    writingCitationStyleCitekey: "[@citekey]",
+    writingCitationStyleAuthorYear: "（作者, 年份）",
+  },
+};
+
+const SETTINGS_I18N_READING_CARD_OVERRIDES: Partial<Record<Lang, Dict>> = {
+  "en-US": {
+    readingCardTemplate: "Reading card template",
+    readingCardTemplatePlaceholder:
+      "Empty = built-in template. One line = your own field list. Several lines = your own template.",
+    readingCardTemplateHint:
+      'Used by "Generate reading card" in the + menu. Leave empty for the built-in fields. Type a single line such as "Question, Method, Data, Findings, Limitations, Relevance" to keep the built-in instructions but swap the fields. Type several lines to replace the whole template; write {{FIELDS}} where the field headings should go. The title line, the research-focus rule, and the page-citation rule are always added for you.',
+    readingCardFocus: "My research focus",
+    readingCardFocusPlaceholder:
+      "For example: retrieval-augmented generation for low-resource languages",
+    readingCardFocusHint:
+      'Injected into the card so the last field connects the paper to your work. Left empty, that field becomes "follow-up questions worth pursuing" instead.',
+  },
+  "zh-CN": {
+    readingCardTemplate: "精读卡片模板",
+    readingCardTemplatePlaceholder:
+      "留空 = 内置模板；只填一行 = 自定义字段清单；填多行 = 整体替换模板。",
+    readingCardTemplateHint:
+      "用于 + 菜单中的「生成精读卡片」。留空则使用内置字段；只填一行（如“研究问题, 方法, 数据, 结论, 局限, 关联”，中英文逗号/顿号分隔）则保留内置说明、只替换字段清单；填多行则整体替换模板正文，可用 {{FIELDS}} 指定字段标题的位置。标题行、研究方向说明和页码引用要求会自动附加。",
+    readingCardFocus: "我的研究方向",
+    readingCardFocusPlaceholder: "例如：面向低资源语言的检索增强生成",
+    readingCardFocusHint:
+      "会注入到卡片中，让最后一个字段把文献与你的工作联系起来。留空时该字段改写“值得关注的延伸问题”。",
+  },
+};
+
 const SETTINGS_I18N_RUNTIME_OVERRIDES: Partial<Record<Lang, Dict>> = {
   "zh-TW": {
     language: "介面語言",
@@ -2456,6 +2542,14 @@ const tt = (l: Lang): Dict =>
     ...(SETTINGS_I18N_COMPOSER_THEME_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_TYPOGRAPHY_OVERRIDES["en-US"] || {}),
     ...(SETTINGS_I18N_TYPOGRAPHY_OVERRIDES[l] || {}),
+    ...(SETTINGS_I18N_PAGE_ANCHOR_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_PAGE_ANCHOR_OVERRIDES[l] || {}),
+    ...(SETTINGS_I18N_READING_CARD_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_READING_CARD_OVERRIDES[l] || {}),
+    ...(SETTINGS_I18N_CONCEPT_CARD_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_CONCEPT_CARD_OVERRIDES[l] || {}),
+    ...(SETTINGS_I18N_WRITING_EXPORT_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_WRITING_EXPORT_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_RUNTIME_OVERRIDES[l] || {}),
   }) as Dict;
 
@@ -4837,6 +4931,51 @@ export async function bootstrapSettingTab(
     if (atl) atl.textContent = L.showAddText;
     const ath = doc.querySelector(`#${config.addonRef}-popup-add-text-hint`);
     if (ath) ath.textContent = L.showAddTextHint;
+    const pal = doc.querySelector(`#${config.addonRef}-page-anchors-label`);
+    if (pal) pal.textContent = L.pageAnchors;
+    const pah = doc.querySelector(`#${config.addonRef}-page-anchors-hint`);
+    if (pah) pah.textContent = L.pageAnchorsHint;
+    const rctl = doc.querySelector(
+      `#${config.addonRef}-reading-card-template-label`,
+    );
+    if (rctl) rctl.textContent = L.readingCardTemplate;
+    const rcti = doc.querySelector(
+      `#${config.addonRef}-reading-card-template-input`,
+    ) as HTMLTextAreaElement | null;
+    if (rcti) rcti.placeholder = L.readingCardTemplatePlaceholder;
+    const rcth = doc.querySelector(
+      `#${config.addonRef}-reading-card-template-hint`,
+    );
+    if (rcth) rcth.textContent = L.readingCardTemplateHint;
+    const rcfl = doc.querySelector(
+      `#${config.addonRef}-reading-card-focus-label`,
+    );
+    if (rcfl) rcfl.textContent = L.readingCardFocus;
+    const rcfi = doc.querySelector(
+      `#${config.addonRef}-reading-card-focus-input`,
+    ) as HTMLInputElement | null;
+    if (rcfi) rcfi.placeholder = L.readingCardFocusPlaceholder;
+    const rcfh = doc.querySelector(
+      `#${config.addonRef}-reading-card-focus-hint`,
+    );
+    if (rcfh) rcfh.textContent = L.readingCardFocusHint;
+    const carl = doc.querySelector(
+      `#${config.addonRef}-concept-auto-recall-label`,
+    );
+    if (carl) carl.textContent = L.conceptAutoRecall;
+    const carh = doc.querySelector(
+      `#${config.addonRef}-concept-auto-recall-hint`,
+    );
+    if (carh) carh.textContent = L.conceptAutoRecallHint;
+    const wcsl = doc.querySelector(
+      `#${config.addonRef}-writing-citation-style-label`,
+    );
+    if (wcsl) wcsl.textContent = L.writingCitationStyle;
+    const wcsh = doc.querySelector(
+      `#${config.addonRef}-writing-citation-style-hint`,
+    );
+    if (wcsh) wcsh.textContent = L.writingCitationStyleHint;
+    updateWritingCitationStyleUi();
     const apt = doc.querySelector(`#${config.addonRef}-author-profiles-title`);
     if (apt) apt.textContent = L.authorProfilesTitle;
     const apm = doc.querySelector(
@@ -6163,6 +6302,9 @@ export async function bootstrapSettingTab(
       "translate.poolMaxWorker": "1",
       "translate.fontFamily": "auto",
       "translate.scrollTop": "0",
+      "readingCard.template": "",
+      "readingCard.researchFocus": "",
+      "writingExport.citationStyle": "auto",
     };
     for (const [key, value] of Object.entries(defaults)) {
       setPref(key as PrefKey, value);
@@ -6174,6 +6316,8 @@ export async function bootstrapSettingTab(
     }
     Zotero.Prefs.set(`${config.prefsPrefix}.showPopupAddText`, true, true);
     Zotero.Prefs.set(`${config.prefsPrefix}.showAllModels`, false, true);
+    setBoolPref("pageAnchors.enabled", true);
+    setBoolPref("conceptCards.autoRecall", true);
     setBoolPref("authorProfiles.contextMenuEnabled", false);
     setBoolPref("selectionTranslate.enabled", true);
     setBoolPref("selectionTranslate.auto", true);
@@ -6225,6 +6369,11 @@ export async function bootstrapSettingTab(
     renderModels();
     void renderAccounts();
     if (systemPromptInput) systemPromptInput.value = "";
+    if (readingCardTemplateInput) readingCardTemplateInput.value = "";
+    if (readingCardFocusInput) readingCardFocusInput.value = "";
+    if (conceptRecallInput) conceptRecallInput.checked = true;
+    writingCitationStyleValue = "auto";
+    updateWritingCitationStyleUi();
     if (popupInput) popupInput.checked = true;
     if (authorProfilesMenuInput) {
       authorProfilesMenuInput.checked = false;
@@ -6549,6 +6698,25 @@ export async function bootstrapSettingTab(
     }
   });
 
+  // Declared ahead of the control itself so the first renderStaticText() —
+  // which runs before the Advanced fields are built — can already call it.
+  let writingCitationStyleValue = normalizeWritingCitationStylePreference(
+    getPref("writingExport.citationStyle"),
+  );
+  let writingCitationStyleBtns: Array<{
+    button: HTMLButtonElement;
+    option: (typeof WRITING_CITATION_STYLE_OPTIONS)[number];
+  }> = [];
+  const updateWritingCitationStyleUi = () => {
+    writingCitationStyleBtns.forEach(({ button, option }) => {
+      button.textContent = L[option.labelKey] || option.value;
+      button.classList.toggle(
+        "active",
+        option.value === writingCitationStyleValue,
+      );
+    });
+  };
+
   const advancedGroup = createEl(doc, "div", "llm-set-card");
   const advancedTitle = createEl(
     doc,
@@ -6635,6 +6803,195 @@ export async function bootstrapSettingTab(
       true,
     );
   });
+
+  const pageAnchorWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const pageAnchorLabel = createEl(doc, "label", "llm-set-radio-label");
+  const pageAnchorInput = createEl(
+    doc,
+    "input",
+    "llm-set-checkbox",
+  ) as HTMLInputElement;
+  pageAnchorInput.type = "checkbox";
+  pageAnchorInput.checked = getBoolPref("pageAnchors.enabled", true);
+  const pageAnchorText = createEl(doc, "span", "", L.pageAnchors);
+  pageAnchorText.id = `${config.addonRef}-page-anchors-label`;
+  pageAnchorLabel.append(pageAnchorInput, pageAnchorText);
+  const pageAnchorHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.pageAnchorsHint,
+  );
+  pageAnchorHint.id = `${config.addonRef}-page-anchors-hint`;
+  pageAnchorWrap.append(pageAnchorLabel, pageAnchorHint);
+  advancedBody.appendChild(pageAnchorWrap);
+
+  pageAnchorInput.addEventListener("change", () => {
+    setBoolPref("pageAnchors.enabled", pageAnchorInput.checked);
+  });
+
+  // ── Concept cards ──
+  // Gates only the recall side: the cards keep accumulating either way.
+  const conceptRecallWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const conceptRecallLabel = createEl(doc, "label", "llm-set-radio-label");
+  const conceptRecallInput = createEl(
+    doc,
+    "input",
+    "llm-set-checkbox",
+  ) as HTMLInputElement;
+  conceptRecallInput.type = "checkbox";
+  conceptRecallInput.checked = getBoolPref("conceptCards.autoRecall", true);
+  const conceptRecallText = createEl(doc, "span", "", L.conceptAutoRecall);
+  conceptRecallText.id = `${config.addonRef}-concept-auto-recall-label`;
+  conceptRecallLabel.append(conceptRecallInput, conceptRecallText);
+  const conceptRecallHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.conceptAutoRecallHint,
+  );
+  conceptRecallHint.id = `${config.addonRef}-concept-auto-recall-hint`;
+  conceptRecallWrap.append(conceptRecallLabel, conceptRecallHint);
+  advancedBody.appendChild(conceptRecallWrap);
+
+  conceptRecallInput.addEventListener("change", () => {
+    setBoolPref("conceptCards.autoRecall", conceptRecallInput.checked);
+  });
+
+  // ── Writing draft citations ──
+  // A segmented control rather than a checkbox: "auto" is a real third state,
+  // not the absence of the other two.
+  const writingCitationStyleWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-segment-field llm-set-writing-citation-field llm-set-subsection",
+  );
+  const writingCitationStyleLabel = createEl(
+    doc,
+    "label",
+    "llm-set-label",
+    L.writingCitationStyle,
+  );
+  writingCitationStyleLabel.id = `${config.addonRef}-writing-citation-style-label`;
+  const writingCitationStyleTabBar = createEl(doc, "div", "llm-set-tab-bar");
+  const writingCitationStyleHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.writingCitationStyleHint,
+  );
+  writingCitationStyleHint.id = `${config.addonRef}-writing-citation-style-hint`;
+  writingCitationStyleBtns = WRITING_CITATION_STYLE_OPTIONS.map((option) => {
+    const button = createEl(
+      doc,
+      "button",
+      "llm-set-tab-btn",
+    ) as HTMLButtonElement;
+    button.type = "button";
+    button.addEventListener("click", () => {
+      writingCitationStyleValue = option.value;
+      setPref("writingExport.citationStyle", option.value);
+      updateWritingCitationStyleUi();
+    });
+    writingCitationStyleTabBar.appendChild(button);
+    return { button, option };
+  });
+  updateWritingCitationStyleUi();
+  writingCitationStyleWrap.append(
+    writingCitationStyleLabel,
+    writingCitationStyleTabBar,
+    writingCitationStyleHint,
+  );
+  advancedBody.appendChild(writingCitationStyleWrap);
+
+  // ── Reading card ──
+  // Both fields feed the "+ → Generate reading card" prompt. Empty is the
+  // documented default for each: built-in fields, and no research focus.
+  const readingCardWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const readingCardTemplateLabel = createEl(
+    doc,
+    "label",
+    "llm-set-label",
+    L.readingCardTemplate,
+  );
+  readingCardTemplateLabel.id = `${config.addonRef}-reading-card-template-label`;
+  const readingCardTemplateInput = createEl(
+    doc,
+    "textarea",
+    "llm-set-input llm-set-textarea",
+  ) as HTMLTextAreaElement;
+  readingCardTemplateInput.id = `${config.addonRef}-reading-card-template-input`;
+  readingCardTemplateInput.rows = 4;
+  readingCardTemplateInput.placeholder = L.readingCardTemplatePlaceholder;
+  const readingCardTemplateHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.readingCardTemplateHint,
+  );
+  readingCardTemplateHint.id = `${config.addonRef}-reading-card-template-hint`;
+  readingCardWrap.append(
+    readingCardTemplateLabel,
+    readingCardTemplateInput,
+    readingCardTemplateHint,
+  );
+  advancedBody.appendChild(readingCardWrap);
+
+  readingCardTemplateInput.value = getPref("readingCard.template") || "";
+  readingCardTemplateInput.addEventListener("input", () =>
+    setPref("readingCard.template", readingCardTemplateInput.value),
+  );
+
+  const readingCardFocusWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const readingCardFocusLabel = createEl(
+    doc,
+    "label",
+    "llm-set-label",
+    L.readingCardFocus,
+  );
+  readingCardFocusLabel.id = `${config.addonRef}-reading-card-focus-label`;
+  const readingCardFocusInput = createEl(
+    doc,
+    "input",
+    "llm-set-input",
+  ) as HTMLInputElement;
+  readingCardFocusInput.id = `${config.addonRef}-reading-card-focus-input`;
+  readingCardFocusInput.type = "text";
+  readingCardFocusInput.placeholder = L.readingCardFocusPlaceholder;
+  const readingCardFocusHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.readingCardFocusHint,
+  );
+  readingCardFocusHint.id = `${config.addonRef}-reading-card-focus-hint`;
+  readingCardFocusWrap.append(
+    readingCardFocusLabel,
+    readingCardFocusInput,
+    readingCardFocusHint,
+  );
+  advancedBody.appendChild(readingCardFocusWrap);
+
+  readingCardFocusInput.value = getPref("readingCard.researchFocus") || "";
+  readingCardFocusInput.addEventListener("input", () =>
+    setPref("readingCard.researchFocus", readingCardFocusInput.value),
+  );
 
   const authorProfilesWrap = createEl(
     doc,

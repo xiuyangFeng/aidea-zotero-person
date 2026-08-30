@@ -1052,6 +1052,12 @@
   align-self: center;
 }
 
+/* Writing-draft citation style: label + segments on one row, hint below. */
+.llm-set-writing-citation-field > .llm-set-hint {
+  flex-basis: 100%;
+  margin-left: 0;
+}
+
 .llm-set-oauth-env-update-field > .llm-set-label {
   font-weight: 700;
 }
@@ -4481,6 +4487,67 @@
   opacity: 1;
 }
 
+/* Inline page citation chip ([p.12]) inside assistant answers */
+.llm-page-anchor {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  margin: 0 1px;
+  padding: 0 5px;
+  border: 1px solid
+    color-mix(in srgb, var(--color-accent) 32%, transparent);
+  border-radius: var(--llm-radius-pill);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+  font-size: max(9px, calc(var(--llm-chat-font-size) - 4px));
+  font-weight: 600;
+  font-style: normal;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.llm-page-anchor:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.llm-page-anchor:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-page-anchor {
+  border-color: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 32%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 10%,
+    transparent
+  );
+  color: var(--llm-theme-link, var(--llm-theme-accent, var(--color-accent)));
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-page-anchor:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 60%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 20%,
+    transparent
+  );
+}
+
 .llm-bubble.assistant blockquote {
   border-left: 3px solid var(--color-accent);
   margin: 8px 0;
@@ -4913,6 +4980,31 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 
 .llm-base-pdf-chip .llm-paper-context-chip-label {
   color: var(--accent-blue8, #4fa0d8);
+}
+
+/*
+ * Pinned reader annotations. Marked with the same accent the page-anchor
+ * chips use, so "content the user pointed at in the document" reads as one
+ * family across the composer and the answers.
+ */
+.llm-annotation-context-chip {
+  border-left: 2px solid
+    color-mix(
+      in srgb,
+      var(--llm-theme-accent, var(--color-accent)) 70%,
+      transparent
+    );
+  border-radius: var(--llm-radius-xs);
+}
+
+.llm-annotation-context-chip .llm-paper-context-chip-label {
+  color: var(--llm-theme-link, var(--llm-theme-accent, var(--color-accent)));
+}
+
+.llm-annotation-context-chip .llm-paper-context-chip-label::before {
+  content: "🖍";
+  margin-inline-end: 4px;
+  font-size: 0.9em;
 }
 
 .llm-paper-context-chip-label {

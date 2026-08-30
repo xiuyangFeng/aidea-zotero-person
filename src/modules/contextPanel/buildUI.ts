@@ -507,7 +507,88 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       textContent: i18n.addSelectedLibraryItems,
     },
   );
-  slashMenu.append(slashUploadBtn, slashReferenceBtn, slashLibraryBtn);
+  const slashAnnotationsBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-annotations-option",
+      type: "button",
+      textContent: i18n.addMyAnnotations,
+    },
+  );
+  const slashAnnotationSummaryBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-annotation-summary-option",
+      type: "button",
+      textContent: i18n.summarizeMyAnnotations,
+    },
+  );
+  const slashReadingCardBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-reading-card-option",
+      type: "button",
+      textContent: i18n.generateReadingCard,
+    },
+  );
+  const slashConceptExtractBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-concept-extract-option",
+      type: "button",
+      textContent: i18n.extractConceptCards,
+    },
+  );
+  const slashConceptRecordBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-concept-record-option",
+      type: "button",
+      textContent: i18n.recordConceptCard,
+    },
+  );
+  const slashGlossaryExportBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-glossary-export-option",
+      type: "button",
+      textContent: i18n.exportGlossary,
+    },
+  );
+  const slashWritingDraftBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item",
+    {
+      id: "llm-slash-writing-draft-option",
+      type: "button",
+      textContent: i18n.exportWritingDraft,
+    },
+  );
+  slashMenu.append(
+    slashUploadBtn,
+    slashReferenceBtn,
+    slashLibraryBtn,
+    slashAnnotationsBtn,
+    slashAnnotationSummaryBtn,
+    slashReadingCardBtn,
+    slashConceptExtractBtn,
+    slashConceptRecordBtn,
+    slashGlossaryExportBtn,
+    slashWritingDraftBtn,
+  );
   container.appendChild(slashMenu);
 
   // Retry model menu (opened from latest assistant retry action)

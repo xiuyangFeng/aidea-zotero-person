@@ -42,6 +42,9 @@ describe("sendFlowController selected text conversation key", function () {
         return `${promptText}\n${texts.join("\n")}`;
       },
       buildModelPromptWithFileContext: (question) => question,
+      getAnnotationContext: () => null,
+      buildModelPromptWithAnnotationContext: (question) => question,
+      annotationOnlyPromptText: "Please analyze my annotations.",
       isGlobalMode: () => false,
       normalizeConversationTitleSeed: (raw) => `${raw || ""}`.trim(),
       getConversationKey: () => conversationKey,

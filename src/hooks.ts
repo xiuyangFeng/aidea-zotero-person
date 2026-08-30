@@ -16,6 +16,7 @@ import { migrateLegacyAdvancedModelParamPrefs } from "./modules/contextPanel/pre
 import { removeReaderPanels } from "./modules/contextPanel/readerPanel";
 import { initChatStore } from "./utils/chatStore";
 import { initMemoryStore } from "./utils/memoryStore";
+import { initConceptStore } from "./utils/conceptStore";
 import {
   initAttachmentRefStore,
   reconcileNoteAttachmentRefsFromNoteContent,
@@ -94,6 +95,11 @@ async function onStartup() {
     await initMemoryStore();
   } catch (err) {
     ztoolkit.log("LLM: Failed to initialize memory store", err);
+  }
+  try {
+    await initConceptStore();
+  } catch (err) {
+    ztoolkit.log("LLM: Failed to initialize concept store", err);
   }
   try {
     await initAttachmentRefStore();

@@ -10,6 +10,9 @@ export { normalizeSelectedTextSource } from "./normalizers";
 export const DEFAULT_SELECTED_TEXT_PROMPT =
   "Please explain this selected text.";
 export const DEFAULT_FILE_ANALYSIS_PROMPT = "Please analyze attached files.";
+/** Used when pinned annotations are the only context the user supplied. */
+export const DEFAULT_ANNOTATION_ANALYSIS_PROMPT =
+  "Please analyze my annotations of this document.";
 
 export function getSelectedTextSourceIcon(source: SelectedTextSource): string {
   return source === "model" ? "🧠" : "📋";

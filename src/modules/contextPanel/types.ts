@@ -11,6 +11,7 @@ import type {
   ReasoningLevel,
   ReasoningProvider,
 } from "../../utils/reasoningProfiles";
+import type { AnnotationRecord } from "../../utils/annotationContext";
 
 export type SelectedTextSource = "pdf" | "model";
 export type SelectedTextContext = {
@@ -151,6 +152,15 @@ export type PaperContextRef = {
   title: string;
   firstCreator?: string;
   year?: string;
+};
+
+/** Highlights and notes the user pinned into the composer as context. */
+export type AnnotationContextSelection = {
+  /** Attachment the annotations were read from. */
+  attachmentId: number;
+  /** Document title shown on the chip and in the context header. */
+  title: string;
+  records: AnnotationRecord[];
 };
 
 export type GlobalConversationSummary = {

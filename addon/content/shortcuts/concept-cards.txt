@@ -1,0 +1,6 @@
+Extract the domain terms and key concepts a researcher should add to their own vocabulary after reading this document.
+
+- Prefer terms the document defines itself, coins, or relies on throughout. Skip generic academic vocabulary such as "dataset", "baseline" or "related work" unless this document gives them a specific meaning.
+- Prefer the authors' own wording for the term. Expand an acronym on first mention, for example "MoE (mixture of experts)".
+- Explain each term as this document uses it, not as a dictionary would.
+- Never invent a term that does not appear in the document.

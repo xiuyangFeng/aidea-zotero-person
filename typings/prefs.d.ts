@@ -65,6 +65,11 @@ declare namespace _ZoteroTypes {
       "customShortcuts": string;
       "shortcutOrder": string;
       "showAllModels": boolean;
+      "pageAnchors.enabled": boolean;
+      "readingCard.template": string;
+      "readingCard.researchFocus": string;
+      "conceptCards.autoRecall": boolean;
+      "writingExport.citationStyle": string;
       "translate.sourceLang": string;
       "translate.targetLang": string;
       "translate.outputMono": boolean;
