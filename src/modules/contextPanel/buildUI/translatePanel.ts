@@ -60,17 +60,29 @@ export function buildTranslatePanel(
   // ═══════════════════════════════════════════════════════════
   const sec1 = buildSection("llm-tr-sec-basic", i18n.trSectionBasic, true);
 
-  // Input path row: [label] [input] [select file btn]
-  const trInputPathSection = createElement(doc, "div", "llm-tr-path-block");
+  // Input path row: [label] [input] [select file btn] + drop hint
+  const trInputPathSection = createElement(doc, "div", "llm-tr-path-block", {
+    id: "llm-tr-input-path-block",
+  });
   const trInputPathLabel = createElement(doc, "div", "llm-tr-field-label", {
     id: "llm-tr-input-path-label",
     textContent: i18n.trInputPath,
   });
   const trInputPathRow = createElement(doc, "div", "llm-tr-row");
-  const trPdfName = createElement(doc, "div", "llm-tr-pdf-name", {
-    id: "llm-tr-pdf-name",
-    textContent: i18n.trNoPdfFound,
+  const trPdfNameWrap = createElement(doc, "div", "llm-tr-pdf-name", {
+    id: "llm-tr-pdf-name-wrap",
   });
+  trPdfNameWrap.setAttribute("data-empty", "true");
+  // Editable so the user can paste / type a path, or drop a file on it
+  // (Gecko fills text inputs with the dropped file's path natively)
+  const trPdfName = createElement(doc, "input", "llm-tr-pdf-input", {
+    id: "llm-tr-pdf-name",
+    type: "text",
+    spellcheck: false,
+    placeholder: i18n.trNoPdfFound,
+  }) as HTMLInputElement;
+  trPdfName.title = i18n.trPdfDropHint;
+  trPdfNameWrap.append(trPdfName);
   const trPickFileBtn = createElement(
     doc,
     "button",
@@ -81,8 +93,12 @@ export function buildTranslatePanel(
       textContent: i18n.trSelectLocalPdf,
     },
   );
+  const trDropHint = createElement(doc, "div", "llm-tr-drop-hint", {
+    id: "llm-tr-drop-hint",
+    textContent: i18n.trPdfDropHint,
+  });
   trInputPathRow.append(trPdfName, trPickFileBtn);
-  trInputPathSection.append(trInputPathLabel, trInputPathRow);
+  trInputPathSection.append(trInputPathLabel, trInputPathRow, trDropHint);
 
   // Save path row: [label] [input] [browse btn] — aligned with input path
   const trSavePathSection = createElement(doc, "div", "llm-tr-path-block");

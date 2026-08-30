@@ -7454,6 +7454,22 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   gap: 2px;
 }
 
+/* ── Drop hint under the input path row (drag & drop PDF) ── */
+.llm-tr-drop-hint {
+  font-size: var(--llm-fs-10, 10px);
+  color: var(--fill-secondary, #888);
+  padding: 1px 2px 0 2px;
+  opacity: 0.85;
+}
+
+/* Highlight the PDF source block while dragging a file/item over the tab */
+.llm-tr-dragover {
+  border-radius: 6px;
+  outline: 2px dashed color-mix(in srgb, #0d9488 60%, transparent);
+  outline-offset: 2px;
+  background: color-mix(in srgb, #0d9488 10%, transparent);
+}
+
 /* ── Field Label (small inline label, e.g. for lang selects) ── */
 .llm-tr-field-label {
   font-weight: 500;
@@ -7500,9 +7516,27 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 }
 
 /* Subtle muted state when no PDF is loaded */
-.llm-tr-pdf-name:empty::before,
 .llm-tr-pdf-name[data-empty="true"]::before {
   content: "📭";
+}
+
+/* Editable path field inside the card (paste / type / drop a path) */
+.llm-tr-pdf-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-size: var(--llm-fs-10, 10px);
+  font-family: inherit;
+  padding: 0;
+  margin: 0;
+}
+
+.llm-tr-pdf-name:focus-within {
+  border-color: color-mix(in srgb, #0d9488 40%, transparent);
 }
 
 /* ── Select (model, languages) ── */

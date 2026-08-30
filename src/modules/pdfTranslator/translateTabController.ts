@@ -8,6 +8,11 @@
  * -------------------------------------------------------------------------*/
 
 import { getModelChoices } from "../contextPanel/setupHandlers/controllers/modelSelectionController";
+import {
+  isFileDragEvent,
+  isZoteroItemDragEvent,
+  getZoteroDragItemIds,
+} from "../contextPanel/setupHandlers/controllers/fileIntakeController";
 import { getPanelI18n } from "../contextPanel/i18n";
 import { cleanupTranslateTempCache } from "./tempCache";
 import type { ProgressData, TranslationStats, WarningStats } from "./types";
@@ -42,6 +47,7 @@ const TRANSLATE_PREFS = {
 
 declare const Zotero: any;
 declare const addon: any;
+declare const Services: any;
 
 const LOW_SIGNAL_ENGINE_DETAIL_RE =
   /(?:INFO:pdf2zh_next|INFO:babeldoc|WARNING:babeldoc|il_translator_llm_only\.py:(?:774|783|797|824))/i;
@@ -766,11 +772,67 @@ export function initTranslateTab(body: Element): void {
         if (!win) return;
         const path = await pickPdfFile(win);
         if (path) {
-          setSelectedPdfPath(body, path);
+          setSelectedPdfPath(body, path, true);
         }
       } catch (err) {
         const i18n = getPanelI18n();
         consoleLog(body, `❌ ${i18n.trLogError(String(err))}`, "error");
+      }
+    });
+  }
+
+  // ── Drag & drop PDF / library item anywhere on the translate tab ──
+  bindPdfDropTarget(body);
+
+  // ── Editable input path field (paste / type a path, Enter to apply) ──
+  const pdfPathInput = body.querySelector(
+    "#llm-tr-pdf-name",
+  ) as HTMLInputElement | null;
+  if (pdfPathInput) {
+    const commitPdfPathInput = () => {
+      const value = (pdfPathInput.value || "").trim();
+      const session = getTranslationSession(body);
+      if (value === session.selectedPdfPath) return;
+      const revert = () => {
+        pdfPathInput.value = session.selectedPdfPath;
+        pdfPathInput.scrollLeft = pdfPathInput.scrollWidth;
+      };
+      if (!value) {
+        // Cleared — resume auto-detecting the selected item's PDF
+        session.selectedPdfPath = "";
+        session.pdfSourceManual = false;
+        pdfPathInput.title = pdfPathInput.placeholder || "";
+        pdfPathInput
+          .closest(".llm-tr-pdf-name")
+          ?.setAttribute("data-empty", "true");
+        return;
+      }
+      const isPdfPath = /\.pdf$/i.test(value.split(/[\\/]/).pop() || "");
+      void (async () => {
+        let valid = isPdfPath;
+        if (valid) {
+          try {
+            valid = await IOUtils.exists(value);
+          } catch {
+            // Existence check failed — let the translation engine decide
+            valid = true;
+          }
+        }
+        if (!valid) {
+          const i18n = getPanelI18n();
+          consoleLog(body, `⚠️ ${i18n.trLogInvalidPdfPath(value)}`, "error");
+          revert();
+          return;
+        }
+        setSelectedPdfPath(body, value, true);
+      })();
+    };
+    pdfPathInput.addEventListener("change", commitPdfPathInput);
+    pdfPathInput.addEventListener("blur", commitPdfPathInput);
+    pdfPathInput.addEventListener("keydown", (e: Event) => {
+      if ((e as KeyboardEvent).key === "Enter") {
+        e.preventDefault();
+        pdfPathInput.blur();
       }
     });
   }
@@ -973,6 +1035,8 @@ export function refreshTranslateModels(body: Element): void {
 /** Store the currently selected PDF path as a data attribute */
 interface TranslationSession {
   selectedPdfPath: string;
+  /** True once the user explicitly picked / dropped a PDF in this panel */
+  pdfSourceManual: boolean;
   translationStartTime: number;
   isPaused: boolean;
   activeController: any;
@@ -993,6 +1057,7 @@ const _translationSessions = new WeakMap<Element, TranslationSession>();
 function createTranslationSession(): TranslationSession {
   return {
     selectedPdfPath: "",
+    pdfSourceManual: false,
     translationStartTime: 0,
     isPaused: false,
     activeController: null,
@@ -1041,14 +1106,25 @@ const PAGE_DURATION_HISTORY_LIMIT = 8;
  */
 const activeProgressSessions = new Set<TranslationSession>();
 
-function setSelectedPdfPath(body: Element, pdfPath: string): void {
-  getTranslationSession(body).selectedPdfPath = pdfPath;
-  const nameEl = body.querySelector("#llm-tr-pdf-name") as HTMLElement | null;
+function setSelectedPdfPath(
+  body: Element,
+  pdfPath: string,
+  manual = false,
+): void {
+  const session = getTranslationSession(body);
+  session.selectedPdfPath = pdfPath;
+  if (manual) session.pdfSourceManual = true;
+  const nameEl = body.querySelector(
+    "#llm-tr-pdf-name",
+  ) as HTMLInputElement | null;
   if (nameEl) {
-    // Show just the filename
-    const basename = pdfPath.split(/[\\/]/).pop() || pdfPath;
-    nameEl.textContent = basename;
-    nameEl.title = pdfPath;
+    nameEl.value = pdfPath;
+    nameEl.title = pdfPath || nameEl.placeholder || "";
+    // Keep the filename (end of the path) visible in the narrow box
+    nameEl.scrollLeft = nameEl.scrollWidth;
+    nameEl
+      .closest(".llm-tr-pdf-name")
+      ?.setAttribute("data-empty", pdfPath ? "false" : "true");
   }
 }
 
@@ -1406,11 +1482,245 @@ function copyConsole(body: Element): void {
   }
 }
 
+/* ── Drag & drop PDF onto the translate tab ── */
+
+/**
+ * Accept PDF file drops (from the OS) and Zotero item drops (from the
+ * library pane) on the translate tab, mirroring the chat input's drag &
+ * drop behavior. Handlers attach to both the input path row (so a drop
+ * directly on the box always works) and the whole tab panel.
+ */
+function bindPdfDropTarget(body: Element): void {
+  const dropHighlight = body.querySelector(
+    "#llm-tr-input-path-block",
+  ) as HTMLElement | null;
+  const targets = [
+    dropHighlight,
+    body.querySelector("#llm-tab-panel-translate"),
+  ].filter((el): el is HTMLElement => el instanceof Element && !!el);
+  if (!targets.length) return;
+  ztoolkit.log("LLM: translate tab drop targets bound", targets.length);
+
+  for (const target of targets) {
+    let dragDepth = 0;
+    const setDragOver = (active: boolean) => {
+      dropHighlight?.classList.toggle("llm-tr-dragover", active);
+    };
+
+    target.addEventListener("dragenter", (e: Event) => {
+      const dragEvent = e as DragEvent;
+      if (!isFileDragEvent(dragEvent) && !isZoteroItemDragEvent(dragEvent)) {
+        return;
+      }
+      dragEvent.preventDefault();
+      dragEvent.stopPropagation();
+      dragDepth += 1;
+      setDragOver(true);
+    });
+
+    target.addEventListener("dragover", (e: Event) => {
+      const dragEvent = e as DragEvent;
+      if (!isFileDragEvent(dragEvent) && !isZoteroItemDragEvent(dragEvent)) {
+        return;
+      }
+      dragEvent.preventDefault();
+      dragEvent.stopPropagation();
+      if (dragEvent.dataTransfer) dragEvent.dataTransfer.dropEffect = "copy";
+      setDragOver(true);
+    });
+
+    target.addEventListener("dragleave", (e: Event) => {
+      const dragEvent = e as DragEvent;
+      if (!isFileDragEvent(dragEvent) && !isZoteroItemDragEvent(dragEvent)) {
+        return;
+      }
+      dragEvent.preventDefault();
+      dragEvent.stopPropagation();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDragOver(false);
+    });
+
+    target.addEventListener("drop", (e: Event) => {
+      const dragEvent = e as DragEvent;
+      if (!isFileDragEvent(dragEvent) && !isZoteroItemDragEvent(dragEvent)) {
+        return;
+      }
+      dragEvent.preventDefault();
+      dragEvent.stopPropagation();
+      dragDepth = 0;
+      setDragOver(false);
+      void handlePdfDrop(body, dragEvent);
+    });
+  }
+}
+
+/**
+ * Resolve a dropped PDF / Zotero item to a filesystem path and select it.
+ */
+async function handlePdfDrop(body: Element, event: DragEvent): Promise<void> {
+  const i18n = getPanelI18n();
+  const dt = event.dataTransfer;
+  if (!dt) return;
+
+  // 1) OS file drop — resolve the real filesystem path of the dropped PDF
+  if (isFileDragEvent(event)) {
+    const pdfs = await collectDroppedPdfCandidates(dt);
+    if (pdfs.length) {
+      const firstWithPath = pdfs.find((pdf) => pdf.path);
+      if (firstWithPath?.path) {
+        setSelectedPdfPath(body, firstWithPath.path, true);
+        consoleLog(
+          body,
+          `📥 ${i18n.trLogDroppedPdf(firstWithPath.name)}`,
+          "success",
+        );
+        return;
+      }
+      consoleLog(body, `⚠️ ${i18n.trLogDropPathUnavailable}`, "error");
+      return;
+    }
+    consoleLog(body, `⚠️ ${i18n.trLogDropNoPdf}`, "error");
+    return;
+  }
+
+  // 2) Zotero item drag — resolve the best PDF attachment of the dropped item
+  if (isZoteroItemDragEvent(event)) {
+    const ids = getZoteroDragItemIds(event);
+    const items = ids
+      .map((id) => Zotero.Items.get(id))
+      .filter((item: any) => !!item);
+    try {
+      const { resolveItemPdfPath } = await import("./pdfSourceResolver");
+      for (const item of items) {
+        const path = await resolveItemPdfPath(item);
+        if (!path) continue;
+        setSelectedPdfPath(body, path, true);
+        const basename = path.split(/[\\/]/).pop() || path;
+        consoleLog(
+          body,
+          `📥 ${i18n.trLogDroppedItemResolved(basename)}`,
+          "success",
+        );
+        return;
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: Failed to resolve dropped Zotero item PDF", err);
+    }
+    consoleLog(body, `⚠️ ${i18n.trLogDropNoPdf}`, "error");
+  }
+}
+
+/** A PDF found in a drop: a display name and its local path (if resolvable) */
+interface DroppedPdfCandidate {
+  name: string;
+  path: string | null;
+}
+
+/**
+ * Collect PDFs from a file drop. Two sources, mirroring Zotero's own
+ * drag-drop handling:
+ *   - `dataTransfer.files` — Gecko exposes the real path on File objects
+ *     in chrome context (`file.path`).
+ *   - `application/x-moz-file` — nsIFile objects via `mozGetDataAt`, the
+ *     flavor Zotero's collection tree uses for OS file drops.
+ */
+async function collectDroppedPdfCandidates(
+  dt: DataTransfer,
+): Promise<DroppedPdfCandidate[]> {
+  const candidates: DroppedPdfCandidate[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = async (name: unknown, path: unknown) => {
+    const normalizedPath = String(path ?? "").trim();
+    const displayName =
+      String(name ?? "").trim() ||
+      normalizedPath.split(/[\\/]/).pop() ||
+      normalizedPath;
+    if (!displayName || !/\.pdf$/i.test(displayName)) return;
+    const dedupeKey = (normalizedPath || displayName).toLowerCase();
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    let resolvedPath: string | null = normalizedPath || null;
+    // On macOS a file URL can keep percent escapes when its strict URI
+    // parser chokes on the path — unescape if the escaped path is not on
+    // disk (same workaround as Zotero.DragDrop.getDataFromDataTransfer).
+    if (
+      resolvedPath &&
+      Zotero.isMac &&
+      /%[0-9A-F]{2}/i.test(resolvedPath) &&
+      !(await IOUtils.exists(resolvedPath))
+    ) {
+      try {
+        resolvedPath = decodeURIComponent(resolvedPath);
+      } catch {
+        /* keep the escaped path */
+      }
+    }
+    candidates.push({ name: displayName, path: resolvedPath });
+  };
+
+  const files = Array.from(dt.files || []) as File[];
+  for (const file of files) {
+    const fileLike = file as File & { mozFullPath?: string; path?: string };
+    try {
+      await addCandidate(fileLike.name, fileLike.path ?? fileLike.mozFullPath);
+    } catch {
+      /* skip unreadable entry */
+    }
+  }
+
+  if (dt.types.includes("application/x-moz-file")) {
+    const count = (dt as any).mozItemCount || 1;
+    for (let i = 0; i < count; i++) {
+      let entry: any;
+      try {
+        entry = (dt as any).mozGetDataAt("application/x-moz-file", i);
+      } catch {
+        continue;
+      }
+      if (!entry) continue;
+      try {
+        entry.QueryInterface(Components.interfaces.nsIFile);
+      } catch {
+        /* not an nsIFile — ignore */
+      }
+      try {
+        if (typeof entry.isDirectory === "function" && entry.isDirectory()) {
+          continue;
+        }
+      } catch {
+        /* fall through — treat as a file */
+      }
+      await addCandidate(entry.leafName, entry.path);
+    }
+  }
+
+  // Some drag sources (browsers, archive tools) only provide a file URL
+  try {
+    const mozUrl = String(dt.getData("text/x-moz-url") || "")
+      .split("\n")[0]
+      ?.trim();
+    if (mozUrl && mozUrl.startsWith("file://")) {
+      const file = Services.io
+        .newURI(mozUrl)
+        .QueryInterface(Components.interfaces.nsIFileURL).file;
+      if (file) await addCandidate(file.leafName, file.path);
+    }
+  } catch {
+    /* not a local file URL — ignore */
+  }
+
+  return candidates;
+}
+
 /**
  * Auto-detect PDF from the current Zotero item.
  */
 async function updatePdfSourceFromItem(body: Element): Promise<void> {
   try {
+    // An explicit user choice (file picker / drag & drop) wins over
+    // auto-detect, so switching tabs doesn't silently replace it.
+    if (getTranslationSession(body).pdfSourceManual) return;
     const { resolveItemPdfPath } = await import("./pdfSourceResolver");
     // Get current item from Zotero
     const pane = (Zotero as any).getActiveZoteroPane?.();

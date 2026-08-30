@@ -148,7 +148,7 @@ function getSelectedZoteroItems(): Zotero.Item[] {
   return [];
 }
 
-function getZoteroDragItemIds(event: DragEvent): number[] {
+export function getZoteroDragItemIds(event: DragEvent): number[] {
   const raw = event.dataTransfer?.getData("zotero/item") || "";
   const rawIds = Array.from(raw.matchAll(/\d+/g))
     .map((match) => Number.parseInt(match[0], 10))

@@ -136,6 +136,12 @@ export type PanelI18n = {
   trCurrentPdf: string;
   trSelectLocalPdf: string;
   trNoPdfFound: string;
+  trPdfDropHint: string;
+  trLogDroppedPdf: (name: string) => string;
+  trLogDroppedItemResolved: (name: string) => string;
+  trLogDropNoPdf: string;
+  trLogDropPathUnavailable: string;
+  trLogInvalidPdfPath: (path: string) => string;
   trSourceLang: string;
   trTargetLang: string;
   trOutputFormat: string;
@@ -702,6 +708,12 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "目前 PDF",
     trSelectLocalPdf: "選擇本機檔案",
     trNoPdfFound: "找不到 PDF 附件",
+    trPdfDropHint: "或將 PDF 檔案 / 文獻條目直接拖入本頁任意位置",
+    trLogDroppedPdf: (name) => `已透過拖放選擇 PDF：${name}`,
+    trLogDroppedItemResolved: (name) => `已從拖入條目解析出 PDF：${name}`,
+    trLogDropNoPdf: "拖入內容中沒有找到 PDF",
+    trLogDropPathUnavailable: "無法取得拖入 PDF 的本機路徑",
+    trLogInvalidPdfPath: (path) => `不是有效的 PDF 檔案路徑：${path}`,
     trSourceLang: "來源語言",
     trTargetLang: "目標語言",
     trOutputFormat: "輸出",
@@ -771,6 +783,16 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "現在の PDF",
     trSelectLocalPdf: "ローカルファイルを選択",
     trNoPdfFound: "PDF 添付が見つかりません",
+    trPdfDropHint:
+      "または PDF ファイルや文献項目をこのタブのどこにでもドラッグ＆ドロップできます",
+    trLogDroppedPdf: (name) => `ドロップされた PDF を選択: ${name}`,
+    trLogDroppedItemResolved: (name) =>
+      `ドロップされた項目から PDF を解決: ${name}`,
+    trLogDropNoPdf: "ドロップされた内容に PDF が見つかりません",
+    trLogDropPathUnavailable:
+      "ドロップされた PDF のローカルパスを取得できません",
+    trLogInvalidPdfPath: (path) =>
+      `有効な PDF ファイルのパスではありません: ${path}`,
     trSourceLang: "元の言語",
     trTargetLang: "翻訳先",
     trOutputFormat: "出力",
@@ -840,6 +862,13 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "현재 PDF",
     trSelectLocalPdf: "로컬 파일 선택",
     trNoPdfFound: "PDF 첨부를 찾을 수 없음",
+    trPdfDropHint:
+      "또는 PDF 파일이나 문헌 항목을 이 탭 어디로든 드래그 앤 드롭하세요",
+    trLogDroppedPdf: (name) => `드롭한 PDF 선택: ${name}`,
+    trLogDroppedItemResolved: (name) => `드롭한 항목에서 PDF 확인: ${name}`,
+    trLogDropNoPdf: "드롭한 내용에서 PDF를 찾을 수 없습니다",
+    trLogDropPathUnavailable: "드롭한 PDF의 로컬 경로를 확인할 수 없습니다",
+    trLogInvalidPdfPath: (path) => `유효한 PDF 파일 경로가 아닙니다: ${path}`,
     trSourceLang: "원본 언어",
     trTargetLang: "대상 언어",
     trOutputFormat: "출력",
@@ -911,6 +940,15 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "PDF actuel",
     trSelectLocalPdf: "Choisir un fichier local",
     trNoPdfFound: "Aucune pièce jointe PDF trouvée",
+    trPdfDropHint:
+      "Ou glissez-déposez un fichier PDF ou une entrée de bibliothèque n'importe où dans cet onglet",
+    trLogDroppedPdf: (name) => `PDF recu par glisser-deposer : ${name}`,
+    trLogDroppedItemResolved: (name) =>
+      `PDF obtenu depuis l'element depose : ${name}`,
+    trLogDropNoPdf: "Aucun PDF trouve dans le contenu depose",
+    trLogDropPathUnavailable:
+      "Impossible de determiner le chemin local du PDF depose",
+    trLogInvalidPdfPath: (path) => `Chemin de fichier PDF invalide : ${path}`,
     trSourceLang: "Source",
     trTargetLang: "Cible",
     trOutputFormat: "Sortie",
@@ -980,6 +1018,15 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "Aktuelles PDF",
     trSelectLocalPdf: "Lokale Datei wählen",
     trNoPdfFound: "Kein PDF-Anhang gefunden",
+    trPdfDropHint:
+      "Oder ziehen Sie eine PDF-Datei oder einen Bibliothekseintrag per Drag & Drop in diesen Tab",
+    trLogDroppedPdf: (name) => `PDF per Drag & Drop uebernommen: ${name}`,
+    trLogDroppedItemResolved: (name) =>
+      `PDF aus abgelegtem Eintrag ermittelt: ${name}`,
+    trLogDropNoPdf: "Kein PDF im abgelegten Inhalt gefunden",
+    trLogDropPathUnavailable:
+      "Lokaler Pfad der abgelegten PDF konnte nicht ermittelt werden",
+    trLogInvalidPdfPath: (path) => `Kein gueltiger PDF-Dateipfad: ${path}`,
     trSourceLang: "Quelle",
     trTargetLang: "Ziel",
     trOutputFormat: "Ausgabe",
@@ -1051,6 +1098,15 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "PDF actual",
     trSelectLocalPdf: "Seleccionar archivo local",
     trNoPdfFound: "No se encontró adjunto PDF",
+    trPdfDropHint:
+      "O arrastre y suelte un archivo PDF o un elemento de la biblioteca en cualquier parte de esta pestaña",
+    trLogDroppedPdf: (name) => `PDF seleccionado al soltar: ${name}`,
+    trLogDroppedItemResolved: (name) =>
+      `PDF obtenido del elemento soltado: ${name}`,
+    trLogDropNoPdf: "No se encontro ningun PDF en el contenido soltado",
+    trLogDropPathUnavailable:
+      "No se pudo determinar la ruta local del PDF soltado",
+    trLogInvalidPdfPath: (path) => `Ruta de archivo PDF no valida: ${path}`,
     trSourceLang: "Origen",
     trTargetLang: "Destino",
     trOutputFormat: "Salida",
@@ -1119,6 +1175,15 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "Текущий PDF",
     trSelectLocalPdf: "Выбрать локальный файл",
     trNoPdfFound: "PDF-вложение не найдено",
+    trPdfDropHint:
+      "Или перетащите PDF-файл или запись библиотеки в любое место этой вкладки",
+    trLogDroppedPdf: (name) => `Выбран PDF из перетащенных файлов: ${name}`,
+    trLogDroppedItemResolved: (name) =>
+      `PDF найден в перетащенной записи: ${name}`,
+    trLogDropNoPdf: "В перетащенном содержимом нет PDF-файла",
+    trLogDropPathUnavailable:
+      "Не удалось определить локальный путь перетащенного PDF",
+    trLogInvalidPdfPath: (path) => `Некорректный путь к PDF-файлу: ${path}`,
     trSourceLang: "Источник",
     trTargetLang: "Цель",
     trOutputFormat: "Вывод",
@@ -1190,6 +1255,14 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "PDF atual",
     trSelectLocalPdf: "Selecionar arquivo local",
     trNoPdfFound: "Nenhum anexo PDF encontrado",
+    trPdfDropHint:
+      "Ou arraste e solte um arquivo PDF ou um item da biblioteca em qualquer lugar desta aba",
+    trLogDroppedPdf: (name) => `PDF selecionado ao soltar: ${name}`,
+    trLogDroppedItemResolved: (name) => `PDF obtido do item soltado: ${name}`,
+    trLogDropNoPdf: "Nenhum PDF encontrado no conteudo soltado",
+    trLogDropPathUnavailable:
+      "Nao foi possivel determinar o caminho local do PDF soltado",
+    trLogInvalidPdfPath: (path) => `Caminho de arquivo PDF invalido: ${path}`,
     trSourceLang: "Origem",
     trTargetLang: "Destino",
     trOutputFormat: "Saída",
@@ -1258,6 +1331,14 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "ملف PDF الحالي",
     trSelectLocalPdf: "اختيار ملف محلي",
     trNoPdfFound: "لم يتم العثور على مرفق PDF",
+    trPdfDropHint:
+      "أو اسحب ملف PDF أو عنصر مكتبة وأفلته في أي مكان بهذه علامة التبويب",
+    trLogDroppedPdf: (name) => `تم اختيار PDF من الملفات المسقطة: ${name}`,
+    trLogDroppedItemResolved: (name) =>
+      `تم تحديد PDF من العنصر المسقط: ${name}`,
+    trLogDropNoPdf: "لم يتم العثور على PDF في المحتوى المسقط",
+    trLogDropPathUnavailable: "تعذر تحديد المسار المحلي لملف PDF المسقط",
+    trLogInvalidPdfPath: (path) => `مسار ملف PDF غير صالح: ${path}`,
     trSourceLang: "المصدر",
     trTargetLang: "الهدف",
     trOutputFormat: "الإخراج",
@@ -1327,6 +1408,14 @@ const PANEL_I18N_OVERRIDES: Partial<Record<PanelLang, Partial<PanelI18n>>> = {
     trCurrentPdf: "वर्तमान PDF",
     trSelectLocalPdf: "स्थानीय फ़ाइल चुनें",
     trNoPdfFound: "PDF अटैचमेंट नहीं मिला",
+    trPdfDropHint:
+      "या PDF फ़ाइल या लाइब्रेरी आइटम को इस टैब में कहीं भी खींचकर छोड़ें",
+    trLogDroppedPdf: (name) => `ड्रॉप की गई PDF चुनी गई: ${name}`,
+    trLogDroppedItemResolved: (name) =>
+      `ड्रॉप किए गए आइटम से PDF मिला: ${name}`,
+    trLogDropNoPdf: "ड्रॉप की गई सामग्री में कोई PDF नहीं मिला",
+    trLogDropPathUnavailable: "ड्रॉप की गई PDF का लोकल पाथ नहीं मिल सका",
+    trLogInvalidPdfPath: (path) => `मान्य PDF फ़ाइल पाथ नहीं है: ${path}`,
     trSourceLang: "स्रोत",
     trTargetLang: "लक्ष्य",
     trOutputFormat: "आउटपुट",
@@ -4020,6 +4109,15 @@ export function getPanelI18n(): PanelI18n {
       trCurrentPdf: "Current PDF",
       trSelectLocalPdf: "Select Local File",
       trNoPdfFound: "No PDF attachment found",
+      trPdfDropHint:
+        "Or drag & drop a PDF file or a library item anywhere in this tab",
+      trLogDroppedPdf: (name) => `PDF selected from drop: ${name}`,
+      trLogDroppedItemResolved: (name) =>
+        `PDF resolved from dropped item: ${name}`,
+      trLogDropNoPdf: "No PDF found in the dropped content",
+      trLogDropPathUnavailable:
+        "Could not determine the local path of the dropped PDF",
+      trLogInvalidPdfPath: (path) => `Not a valid PDF file path: ${path}`,
       trSourceLang: "Source",
       trTargetLang: "Target",
       trOutputFormat: "Output",
@@ -4379,6 +4477,12 @@ export function getPanelI18n(): PanelI18n {
     trCurrentPdf: "当前 PDF",
     trSelectLocalPdf: "选择本地文件",
     trNoPdfFound: "未找到 PDF 附件",
+    trPdfDropHint: "或将 PDF 文件 / 文献条目直接拖入本页任意位置",
+    trLogDroppedPdf: (name) => `已通过拖放选择 PDF：${name}`,
+    trLogDroppedItemResolved: (name) => `已从拖入条目解析出 PDF：${name}`,
+    trLogDropNoPdf: "拖入内容中没有找到 PDF",
+    trLogDropPathUnavailable: "无法获取拖入 PDF 的本地路径",
+    trLogInvalidPdfPath: (path) => `不是有效的 PDF 文件路径：${path}`,
     trSourceLang: "源语言",
     trTargetLang: "目标语言",
     trOutputFormat: "输出格式",
@@ -4613,8 +4717,13 @@ export function refreshTranslateTabI18n(doc: Document): void {
 
   // Field labels
   setText("llm-tr-input-path-label", i18n.trInputPath);
-  const pdfName = doc.getElementById("llm-tr-pdf-name") as HTMLElement | null;
-  if (pdfName && !pdfName.title) pdfName.textContent = i18n.trNoPdfFound;
+  const pdfName = doc.getElementById(
+    "llm-tr-pdf-name",
+  ) as HTMLInputElement | null;
+  if (pdfName && !pdfName.value) {
+    pdfName.placeholder = i18n.trNoPdfFound;
+    pdfName.title = i18n.trPdfDropHint;
+  }
   setText("llm-tr-save-path-label", i18n.trSavePath);
   const outputDir = doc.getElementById(
     "llm-tr-output-dir",
@@ -4627,6 +4736,7 @@ export function refreshTranslateTabI18n(doc: Document): void {
 
   // Buttons
   setText("llm-tr-pick-file", i18n.trSelectLocalPdf);
+  setText("llm-tr-drop-hint", i18n.trPdfDropHint);
   setText("llm-tr-browse-dir", i18n.trBrowsePath);
   setText("llm-tr-install-env", `⚙ ${i18n.trInstallEnv}`);
   setText("llm-tr-start", `▶ ${i18n.trStartTranslation}`);
