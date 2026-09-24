@@ -57,8 +57,35 @@ export type PanelI18n = {
   paperContextBatchAdded: (added: number, skipped: number) => string;
   paperContextAdded: (n: number, max: number) => string;
   slashGroupContext: string;
-  slashGroupReading: string;
-  slashGroupExport: string;
+  readingActions: string;
+  readingGroupOverview: string;
+  readingGroupSelection: string;
+  readingGroupDeep: string;
+  readingGroupConcepts: string;
+  readingGroupAnnotations: string;
+  readingActionExplain: string;
+  readingActionDissect: string;
+  readingActionFormula: string;
+  readingActionAlgorithm: string;
+  readingActionTable: string;
+  readingActionReview: string;
+  readingActionSending: string;
+  criticalReviewWholeDocument: string;
+  criticalReviewNoDocument: string;
+  criticalReviewSending: string;
+  synthesisMatrixGenerate: string;
+  synthesisMatrixNeedsTwoPapers: string;
+  synthesisMatrixSending: (count: number) => string;
+  academicPolishing: string;
+  polishModeAcademicTone: string;
+  polishModeConciseness: string;
+  polishModeClarity: string;
+  polishModeReviewerResponse: string;
+  polishingNoSource: string;
+  polishingSending: string;
+  showPolishingDiff: string;
+  hidePolishingDiff: string;
+  polishingDiffUnavailable: string;
   addMyAnnotations: string;
   summarizeMyAnnotations: string;
   annotationContextLabel: (count: number) => string;
@@ -94,6 +121,40 @@ export type PanelI18n = {
   citationInsightScanning: string;
   citationInsightPromptFailed: string;
   citationInsightLibraryMatched: (matched: number, total: number) => string;
+  citationImportOfferOne: (label: string, title: string) => string;
+  citationImportOfferMany: (count: number) => string;
+  citationImportAction: string;
+  citationImportActionFor: (label: string) => string;
+  citationImportAll: (count: number) => string;
+  citationImportWorking: (label: string) => string;
+  citationImportWorkingMany: (done: number, total: number) => string;
+  citationImportDone: (title: string) => string;
+  citationImportDuplicate: (title: string) => string;
+  citationImportNotFound: (label: string) => string;
+  citationImportSummary: (
+    imported: number,
+    duplicates: number,
+    notFound: number,
+    failed: number,
+  ) => string;
+  citationImportSaveFailed: string;
+  citationImportShow: string;
+  citationImportPdfAttached: (title: string) => string;
+  lookupRetry: string;
+  lookupOffline: (service: string) => string;
+  lookupTimeout: (service: string) => string;
+  lookupRateLimited: (service: string, minutes: number | null) => string;
+  lookupFailed: (service: string) => string;
+  paperToCode: string;
+  paperToCodeTitle: string;
+  paperToCodeHint: string;
+  paperToCodeSearching: string;
+  paperToCodeNoPaper: string;
+  paperToCodeNoQuery: string;
+  paperToCodeEmpty: string;
+  paperToCodeCount: (count: number) => string;
+  paperToCodeOpenAria: (name: string) => string;
+  paperToCodeSearchWeb: string;
   suggestedQuestionsTitle: string;
   extractConceptCards: string;
   recordConceptCard: string;
@@ -298,6 +359,27 @@ export type PanelI18n = {
   selectionTranslateCacheReady: string;
   selectionTranslateShowSource: string;
   selectionTranslateHideSource: string;
+  selectionTranslateAction: string;
+  selectionTranslateManualHint: string;
+  quickActionsTitle: string;
+  quickActionsMore: string;
+  quickActionsLess: string;
+  readingActionNoSelection: string;
+  readingActionPanelUnavailable: string;
+  paperModeForeignSelection: string;
+  noticeDismiss: string;
+  noticeRegionLabel: string;
+  autoBriefingNoticeScheduled: string;
+  autoBriefingNoticeCancel: string;
+  autoBriefingNoticeDisable: string;
+  autoBriefingNoticeCanceled: string;
+  autoBriefingNoticeDisabled: string;
+  emptyGuideTitle: string;
+  emptyGuideReaderIntro: string;
+  emptyGuideLibraryIntro: string;
+  emptyGuideAskSelection: string;
+  emptyGuideMoreTools: string;
+  emptyGuideHotkeys: (focus: string, ask: string, translate: string) => string;
   addToNote: string;
   addingToNote: string;
   addedToNote: string;
@@ -1548,7 +1630,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "展開檔案",
     collapseFiles: "收起檔案",
     clearUploadedFiles: "清空上傳檔案",
-    contextActions: "上下文操作",
+    contextActions: "新增上下文",
     newConversation: "新建對話",
     expandPapers: "展開論文",
     collapsePapers: "收起論文",
@@ -1707,7 +1789,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "ファイルを展開",
     collapseFiles: "ファイルを折りたたむ",
     clearUploadedFiles: "アップロード済みファイルをクリア",
-    contextActions: "コンテキスト操作",
+    contextActions: "コンテキストを追加",
     newConversation: "新しい会話",
     expandPapers: "論文を展開",
     collapsePapers: "論文を折りたたむ",
@@ -1868,7 +1950,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "파일 펼치기",
     collapseFiles: "파일 접기",
     clearUploadedFiles: "업로드한 파일 지우기",
-    contextActions: "컨텍스트 작업",
+    contextActions: "컨텍스트 추가",
     newConversation: "새 대화",
     expandPapers: "논문 펼치기",
     collapsePapers: "논문 접기",
@@ -2030,7 +2112,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "Développer les fichiers",
     collapseFiles: "Réduire les fichiers",
     clearUploadedFiles: "Effacer les fichiers importés",
-    contextActions: "Actions de contexte",
+    contextActions: "Ajouter du contexte",
     newConversation: "Nouvelle conversation",
     expandPapers: "Développer les articles",
     collapsePapers: "Réduire les articles",
@@ -2199,7 +2281,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "Dateien erweitern",
     collapseFiles: "Dateien einklappen",
     clearUploadedFiles: "Hochgeladene Dateien löschen",
-    contextActions: "Kontextaktionen",
+    contextActions: "Kontext hinzufügen",
     newConversation: "Neue Unterhaltung",
     expandPapers: "Paper erweitern",
     collapsePapers: "Paper einklappen",
@@ -2367,7 +2449,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "Expandir archivos",
     collapseFiles: "Contraer archivos",
     clearUploadedFiles: "Borrar archivos subidos",
-    contextActions: "Acciones de contexto",
+    contextActions: "Añadir contexto",
     newConversation: "Nueva conversación",
     expandPapers: "Expandir artículos",
     collapsePapers: "Contraer artículos",
@@ -2536,7 +2618,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "Развернуть файлы",
     collapseFiles: "Свернуть файлы",
     clearUploadedFiles: "Очистить загруженные файлы",
-    contextActions: "Действия контекста",
+    contextActions: "Добавить контекст",
     newConversation: "Новый диалог",
     expandPapers: "Развернуть статьи",
     collapsePapers: "Свернуть статьи",
@@ -2700,7 +2782,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "Expandir arquivos",
     collapseFiles: "Recolher arquivos",
     clearUploadedFiles: "Limpar arquivos enviados",
-    contextActions: "Ações de contexto",
+    contextActions: "Adicionar contexto",
     newConversation: "Nova conversa",
     expandPapers: "Expandir artigos",
     collapsePapers: "Recolher artigos",
@@ -2856,7 +2938,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "توسيع الملفات",
     collapseFiles: "طي الملفات",
     clearUploadedFiles: "مسح الملفات المرفوعة",
-    contextActions: "إجراءات السياق",
+    contextActions: "إضافة سياق",
     newConversation: "محادثة جديدة",
     expandPapers: "توسيع الأوراق",
     collapsePapers: "طي الأوراق",
@@ -3014,7 +3096,7 @@ const PANEL_I18N_EXTRA_OVERRIDES: Partial<
     expandFiles: "फ़ाइलें फैलाएँ",
     collapseFiles: "फ़ाइलें समेटें",
     clearUploadedFiles: "अपलोड फ़ाइलें साफ़ करें",
-    contextActions: "संदर्भ क्रियाएँ",
+    contextActions: "संदर्भ जोड़ें",
     newConversation: "नई बातचीत",
     expandPapers: "पेपर फैलाएँ",
     collapsePapers: "पेपर समेटें",
@@ -4032,8 +4114,38 @@ export function getPanelI18n(): PanelI18n {
         `Added ${added} paper(s)${skipped ? `, skipped ${skipped}` : ""}`,
       paperContextAdded: (n, max) => `Paper context added (${n}/${max})`,
       slashGroupContext: "Add context",
-      slashGroupReading: "Reading & notes",
-      slashGroupExport: "Export",
+      readingActions: "Reading actions",
+      readingGroupOverview: "Overview",
+      readingGroupSelection: "On the selection",
+      readingGroupDeep: "Deep dive",
+      readingGroupConcepts: "Concepts & writing",
+      readingGroupAnnotations: "Annotations",
+      readingActionExplain: "Explain in plain language",
+      readingActionDissect: "Break down this sentence",
+      readingActionFormula: "Break down this formula",
+      readingActionAlgorithm: "Walk through this algorithm",
+      readingActionTable: "Read this results table",
+      readingActionReview: "Question this passage",
+      readingActionSending: "Sending the selected passage...",
+      criticalReviewWholeDocument: "Critical review (whole document)",
+      criticalReviewNoDocument:
+        "No readable document to review. Open a PDF or select an item with one.",
+      criticalReviewSending: "Writing the critical review...",
+      synthesisMatrixGenerate: "Build a comparison matrix",
+      synthesisMatrixNeedsTwoPapers:
+        "A comparison matrix needs at least two papers: add them with @ or the + menu",
+      synthesisMatrixSending: (count) => `Comparing ${count} papers...`,
+      academicPolishing: "Academic polishing",
+      polishModeAcademicTone: "Academic tone",
+      polishModeConciseness: "Conciseness",
+      polishModeClarity: "Clarity & coherence",
+      polishModeReviewerResponse: "Reviewer response",
+      polishingNoSource:
+        "Select the text to polish, or paste the paragraph into the composer",
+      polishingSending: "Polishing the text...",
+      showPolishingDiff: "Show changes",
+      hidePolishingDiff: "Hide changes",
+      polishingDiffUnavailable: "Cannot build a diff for this answer",
       addMyAnnotations: "Add my annotations",
       summarizeMyAnnotations: "Summarize my annotations",
       annotationContextLabel: (count) => `Annotations (${count})`,
@@ -4088,6 +4200,58 @@ export function getPanelI18n(): PanelI18n {
         `${matched} of ${total} citation${
           total === 1 ? "" : "s"
         } are in your library — added as supplemental papers, so you can keep asking about them`,
+      citationImportOfferOne: (label, title) =>
+        `${label} “${title}” isn't in your library`,
+      citationImportOfferMany: (count) =>
+        `${count} cited works aren't in your library`,
+      citationImportAction: "Import to Zotero",
+      citationImportActionFor: (label) => `Import ${label}`,
+      citationImportAll: (count) => `Import all (${count})`,
+      citationImportWorking: (label) =>
+        `Looking up ${label} on Crossref / OpenAlex...`,
+      citationImportWorkingMany: (done, total) =>
+        `Importing cited works... ${done}/${total}`,
+      citationImportDone: (title) => `Imported “${title}” to your library`,
+      citationImportDuplicate: (title) =>
+        `“${title}” is already in your library — nothing imported`,
+      citationImportNotFound: (label) =>
+        `No Crossref or OpenAlex record matches ${label} — add it by DOI or ISBN instead`,
+      citationImportSummary: (imported, duplicates, notFound, failed) =>
+        [
+          `Imported ${imported}`,
+          duplicates ? `${duplicates} already in library` : "",
+          notFound ? `${notFound} not found online` : "",
+          failed ? `${failed} failed` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      citationImportSaveFailed: "Could not create the Zotero item",
+      citationImportShow: "Show in library",
+      citationImportPdfAttached: (title) =>
+        `Found a PDF for “${title}” — added as a supplemental paper`,
+      lookupRetry: "Try again",
+      lookupOffline: (service) =>
+        `Can't reach ${service} — check your connection and try again`,
+      lookupTimeout: (service) =>
+        `${service} took too long to answer — try again`,
+      lookupRateLimited: (service, minutes) =>
+        minutes
+          ? `${service} rate limit reached — try again in ${minutes} min`
+          : `${service} rate limit reached — wait a minute and try again`,
+      lookupFailed: (service) => `${service} request failed`,
+      paperToCode: "Find code repositories",
+      paperToCodeTitle: "Code on GitHub",
+      paperToCodeHint:
+        "Repositories that mention this paper — not necessarily the authors' own",
+      paperToCodeSearching: "Searching GitHub for code...",
+      paperToCodeNoPaper: "Open a paper or select one in the library first",
+      paperToCodeNoQuery:
+        "This item has no title, DOI or arXiv id to search for",
+      paperToCodeEmpty: "No GitHub repository mentions this paper",
+      paperToCodeCount: (count) =>
+        `${count} repositor${count === 1 ? "y" : "ies"}`,
+      paperToCodeOpenAria: (name) => `Open ${name} on GitHub`,
+      paperToCodeSearchWeb: "Search on GitHub",
       suggestedQuestionsTitle: "Ask next:",
       extractConceptCards: "Extract concept cards",
       recordConceptCard: "Record a concept...",
@@ -4255,7 +4419,7 @@ export function getPanelI18n(): PanelI18n {
       expandFiles: "Expand files",
       collapseFiles: "Collapse files",
       clearUploadedFiles: "Clear uploaded files",
-      contextActions: "Context actions",
+      contextActions: "Add context",
       newConversation: "New conversation",
       expandPapers: "Expand papers",
       collapsePapers: "Collapse papers",
@@ -4340,6 +4504,29 @@ export function getPanelI18n(): PanelI18n {
       selectionTranslateCacheReady: "Selection translation cache ready",
       selectionTranslateShowSource: "Show the original text",
       selectionTranslateHideSource: "Hide the original text",
+      selectionTranslateAction: "Translate",
+      selectionTranslateManualHint: "Translate the selected text",
+      quickActionsTitle: "Quick actions",
+      quickActionsMore: "More",
+      quickActionsLess: "Fewer",
+      readingActionNoSelection: "No text selected in the reader",
+      readingActionPanelUnavailable: "Open the AIdea panel for this tab first",
+      paperModeForeignSelection: "Paper mode only accepts text from this paper",
+      noticeDismiss: "Dismiss",
+      noticeRegionLabel: "Panel notice",
+      autoBriefingNoticeScheduled: "Generating paper briefing…",
+      autoBriefingNoticeCancel: "Cancel",
+      autoBriefingNoticeDisable: "Don't auto-generate",
+      autoBriefingNoticeCanceled: "Paper briefing canceled",
+      autoBriefingNoticeDisabled:
+        "Automatic briefing turned off. Use Reading → Generate paper briefing any time.",
+      emptyGuideTitle: "Start here",
+      emptyGuideReaderIntro: "Pick a starting point for this paper:",
+      emptyGuideLibraryIntro: "Bring papers into the conversation:",
+      emptyGuideAskSelection: "Explain my selection",
+      emptyGuideMoreTools: "All reading tools…",
+      emptyGuideHotkeys: (focus, ask, translate) =>
+        `Anywhere: ${focus} focus chat · ${ask} ask selection · ${translate} translate selection`,
       addToNote: "Add to note",
       addingToNote: "Adding...",
       addedToNote: "Added",
@@ -4449,8 +4636,37 @@ export function getPanelI18n(): PanelI18n {
       `已添加 ${added} 篇文献${skipped ? `，跳过 ${skipped} 篇` : ""}`,
     paperContextAdded: (n, max) => `已添加论文上下文（${n}/${max}）`,
     slashGroupContext: "添加上下文",
-    slashGroupReading: "阅读与笔记",
-    slashGroupExport: "导出",
+    readingActions: "阅读动作",
+    readingGroupOverview: "通览",
+    readingGroupSelection: "针对选区",
+    readingGroupDeep: "深度",
+    readingGroupConcepts: "概念与写作",
+    readingGroupAnnotations: "标注",
+    readingActionExplain: "通俗解释",
+    readingActionDissect: "长难句拆解",
+    readingActionFormula: "公式拆解",
+    readingActionAlgorithm: "算法走读",
+    readingActionTable: "实验表格洞察",
+    readingActionReview: "审辩质疑",
+    readingActionSending: "正在发送选中的片段…",
+    criticalReviewWholeDocument: "批判性评审（全文）",
+    criticalReviewNoDocument:
+      "找不到可评审的文档，请打开 PDF 或选中带附件的条目",
+    criticalReviewSending: "正在生成批判性评审…",
+    synthesisMatrixGenerate: "生成对比矩阵",
+    synthesisMatrixNeedsTwoPapers:
+      "对比矩阵至少需要两篇文献：用 @ 或 + 菜单添加",
+    synthesisMatrixSending: (count) => `正在对比 ${count} 篇文献…`,
+    academicPolishing: "学术润色",
+    polishModeAcademicTone: "学术语气",
+    polishModeConciseness: "精简篇幅",
+    polishModeClarity: "逻辑连贯",
+    polishModeReviewerResponse: "审稿回复",
+    polishingNoSource: "请先选中要润色的文本，或把段落粘贴到输入框",
+    polishingSending: "正在润色文本…",
+    showPolishingDiff: "显示修改对比",
+    hidePolishingDiff: "隐藏修改对比",
+    polishingDiffUnavailable: "无法为该回答生成修改对比",
     addMyAnnotations: "引入我的标注",
     summarizeMyAnnotations: "汇总我的标注",
     annotationContextLabel: (count) => `标注（${count}）`,
@@ -4495,6 +4711,51 @@ export function getPanelI18n(): PanelI18n {
     citationInsightPromptFailed: "无法生成引文解读提示词",
     citationInsightLibraryMatched: (matched, total) =>
       `${total} 条引用中 ${matched} 条在你的文库中，已挂为补充文献，可继续追问`,
+    citationImportOfferOne: (label, title) =>
+      `${label}「${title}」不在你的文库中`,
+    citationImportOfferMany: (count) => `${count} 篇被引文献不在你的文库中`,
+    citationImportAction: "导入 Zotero",
+    citationImportActionFor: (label) => `导入 ${label}`,
+    citationImportAll: (count) => `全部导入（${count}）`,
+    citationImportWorking: (label) =>
+      `正在通过 Crossref / OpenAlex 查询 ${label}……`,
+    citationImportWorkingMany: (done, total) =>
+      `正在导入被引文献……${done}/${total}`,
+    citationImportDone: (title) => `已将「${title}」导入文库`,
+    citationImportDuplicate: (title) => `「${title}」已在文库中，未重复导入`,
+    citationImportNotFound: (label) =>
+      `Crossref 和 OpenAlex 都没有与 ${label} 匹配的记录，可改用 DOI / ISBN 手动添加`,
+    citationImportSummary: (imported, duplicates, notFound, failed) =>
+      [
+        `已导入 ${imported} 篇`,
+        duplicates ? `${duplicates} 篇已在文库` : "",
+        notFound ? `${notFound} 篇未查到` : "",
+        failed ? `${failed} 篇失败` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    citationImportSaveFailed: "无法创建 Zotero 条目",
+    citationImportShow: "在文库中显示",
+    citationImportPdfAttached: (title) =>
+      `已为「${title}」找到 PDF，并挂为补充文献`,
+    lookupRetry: "重试",
+    lookupOffline: (service) => `无法连接 ${service}，请检查网络后重试`,
+    lookupTimeout: (service) => `${service} 响应超时，请重试`,
+    lookupRateLimited: (service, minutes) =>
+      minutes
+        ? `${service} 请求次数已达上限，请 ${minutes} 分钟后重试`
+        : `${service} 请求次数已达上限，请稍后重试`,
+    lookupFailed: (service) => `${service} 请求失败`,
+    paperToCode: "查找代码仓库",
+    paperToCodeTitle: "GitHub 代码",
+    paperToCodeHint: "提到这篇论文的仓库，不一定是作者官方实现",
+    paperToCodeSearching: "正在 GitHub 上查找代码……",
+    paperToCodeNoPaper: "请先打开论文，或在文库中选中一篇",
+    paperToCodeNoQuery: "该条目没有可用于搜索的标题、DOI 或 arXiv 编号",
+    paperToCodeEmpty: "GitHub 上没有找到提到这篇论文的仓库",
+    paperToCodeCount: (count) => `共 ${count} 个仓库`,
+    paperToCodeOpenAria: (name) => `在 GitHub 上打开 ${name}`,
+    paperToCodeSearchWeb: "在 GitHub 搜索",
     suggestedQuestionsTitle: "继续追问：",
     extractConceptCards: "提取概念卡",
     recordConceptCard: "记录概念……",
@@ -4646,7 +4907,7 @@ export function getPanelI18n(): PanelI18n {
     expandFiles: "展开文件",
     collapseFiles: "收起文件",
     clearUploadedFiles: "清空上传文件",
-    contextActions: "上下文操作",
+    contextActions: "添加上下文",
     newConversation: "新建对话",
     expandPapers: "展开论文",
     collapsePapers: "收起论文",
@@ -4726,6 +4987,29 @@ export function getPanelI18n(): PanelI18n {
     selectionTranslateCacheReady: "划词翻译缓存已就绪",
     selectionTranslateShowSource: "显示原文对照",
     selectionTranslateHideSource: "隐藏原文对照",
+    selectionTranslateAction: "翻译",
+    selectionTranslateManualHint: "翻译选中的文本",
+    quickActionsTitle: "快捷操作",
+    quickActionsMore: "更多",
+    quickActionsLess: "收起",
+    readingActionNoSelection: "阅读器中没有选中文本",
+    readingActionPanelUnavailable: "请先在当前标签页打开 AIdea 面板",
+    paperModeForeignSelection: "论文模式只接受来自本文献的文本",
+    noticeDismiss: "关闭",
+    noticeRegionLabel: "面板提示",
+    autoBriefingNoticeScheduled: "正在生成论文速览…",
+    autoBriefingNoticeCancel: "取消",
+    autoBriefingNoticeDisable: "不再自动生成",
+    autoBriefingNoticeCanceled: "已取消论文速览",
+    autoBriefingNoticeDisabled:
+      "已关闭自动速览，可随时通过「阅读」→「生成论文速览」手动生成",
+    emptyGuideTitle: "从这里开始",
+    emptyGuideReaderIntro: "为这篇文献选一个起点：",
+    emptyGuideLibraryIntro: "把文献带进对话：",
+    emptyGuideAskSelection: "解释选中内容",
+    emptyGuideMoreTools: "全部阅读工具…",
+    emptyGuideHotkeys: (focus, ask, translate) =>
+      `全局快捷键：${focus} 聚焦对话 · ${ask} 询问选中 · ${translate} 翻译选中`,
     addToNote: "添加到笔记",
     addingToNote: "正在添加...",
     addedToNote: "已添加",

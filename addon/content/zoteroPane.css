@@ -4500,8 +4500,7 @@
   vertical-align: baseline;
   margin: 0 1px;
   padding: 0 5px;
-  border: 1px solid
-    color-mix(in srgb, var(--color-accent) 32%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent);
   border-radius: var(--llm-radius-pill);
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   color: var(--color-accent);
@@ -4643,8 +4642,7 @@
   max-width: 100%;
   min-width: 0;
   padding: 5px 12px;
-  border: 1px solid
-    color-mix(in srgb, var(--stroke-secondary) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--stroke-secondary) 85%, transparent);
   border-radius: var(--llm-radius-pill);
   background: color-mix(
     in srgb,
@@ -5892,29 +5890,7 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   line-height: 0;
 }
 
-.llm-new-chat-btn,
-.llm-new-chat-btn.llm-action-icon-only {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  min-width: 36px;
-  height: var(--llm-action-height);
-  min-height: var(--llm-action-height);
-  padding: 0;
-  margin: 0;
-  font-family: inherit;
-  font-size: 0;
-  font-weight: 600;
-  line-height: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  box-shadow: none;
-  border-radius: 0;
-}
-
 .llm-upload-file-btn::before,
-.llm-new-chat-btn::before,
 .llm-select-text-btn::before,
 .llm-select-text-btn.llm-action-icon-only::before,
 .llm-screenshot-btn.llm-action-icon-only::before,
@@ -5939,11 +5915,6 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 .llm-upload-file-btn::before {
   mask-image: url("icons/action-slash.svg");
   -webkit-mask-image: url("icons/action-slash.svg");
-}
-
-.llm-new-chat-btn::before {
-  mask-image: url("icons/action-new-chat.svg");
-  -webkit-mask-image: url("icons/action-new-chat.svg");
 }
 
 .llm-slash-menu {
@@ -6162,6 +6133,28 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
+/* ── Paper to code ───────────────────────────────────────────────────
+ * GitHub results reuse the figure navigator's list; only the caveat line
+ * under the header and the language tag are their own.
+ */
+.llm-code-menu-hint {
+  padding: 0 6px 6px;
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-10);
+  line-height: 1.3;
+}
+
+.llm-code-row-lang {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: var(--llm-radius-xs, 4px);
+  background: var(--fill-quinary);
+  color: var(--fill-secondary);
+  font-size: var(--llm-fs-10);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
 .llm-select-text-btn::before,
 .llm-select-text-btn.llm-action-icon-only::before {
   mask-image: url("icons/action-add-text.svg");
@@ -6178,7 +6171,6 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
 .llm-select-text-btn:hover:not(:disabled),
 .llm-screenshot-btn:hover:not(:disabled),
 .llm-upload-file-btn:hover:not(:disabled),
-.llm-new-chat-btn:hover:not(:disabled),
 .llm-model-btn:hover:not(:disabled),
 .llm-reasoning-btn:hover:not(:disabled),
 .llm-select-text-btn:focus-visible,
@@ -9258,4 +9250,678 @@ button.llm-paper-context-summary-trigger.llm-history-context-trigger {
   ):focus-visible {
   outline: 2px solid var(--llm-theme-accent, var(--color-accent));
   outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Settings Tab — sectioned layout (sticky nav, section shells,
+   keyboard-shortcut fields, local-service scanner)
+   Appended as one block; see src/modules/preferences/*.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Sticky section navigation ── */
+.llm-settings-root > .llm-set-nav {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  /* Bleed into the scroll container's 9px padding so the bar spans the panel. */
+  margin: -9px -9px 0;
+  padding: 7px 9px;
+  background: #f1f2f4;
+  border-bottom: 1px solid #e1e4e8;
+}
+
+.llm-set-nav-chip {
+  flex: 0 0 auto;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid #dcdfe4;
+  border-radius: var(--llm-radius-pill, 999px);
+  background: #ffffff;
+  color: #4b5563;
+  font-family: inherit;
+  font-size: var(--llm-fs-10, 10px);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.llm-set-nav-chip:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.llm-set-nav-chip.is-active {
+  color: #ffffff;
+  background: var(--color-accent, #548af7);
+  border-color: var(--color-accent, #548af7);
+}
+
+.llm-set-nav-chip:focus-visible {
+  outline: 2px solid var(--color-accent, #548af7);
+  outline-offset: 1px;
+}
+
+/* ── Section shell ── */
+.llm-set-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scroll-margin-top: 48px;
+}
+
+.llm-set-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 0;
+  color: #111827;
+  font-size: var(--llm-fs-12, 12px);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.llm-set-section-head-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-set-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* A separator above the first row of a card would be a stray hairline. */
+.llm-set-card > .llm-set-subsection:first-child {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/* ── Keyboard shortcut fields ── */
+.llm-set-hotkeys-card {
+  gap: 8px;
+}
+
+.llm-set-hotkey-field .llm-set-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.llm-set-hotkey-accel {
+  color: #4b5563;
+}
+
+.llm-set-hint--error {
+  color: #b91c1c;
+}
+
+.llm-set-status.is-error {
+  color: #b91c1c;
+}
+
+/* ── Local service scanner ── */
+/* Placeholder that keeps the card's slot in the API-mode panel without adding
+   a box of its own. */
+.llm-set-local-scan-slot {
+  display: contents;
+}
+
+.llm-set-local-scan {
+  gap: 6px;
+}
+
+.llm-set-local-scan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.llm-set-local-scan-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d9dde3;
+  border-radius: var(--llm-radius-sm, 6px);
+  background: #ffffff;
+  color: #1f2937;
+  font-family: inherit;
+  font-size: var(--llm-fs-10, 10px);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.llm-set-local-scan-row:hover {
+  border-color: var(--color-accent, #548af7);
+  background: #f8faff;
+}
+
+.llm-set-local-scan-row:focus-visible {
+  outline: 2px solid var(--color-accent, #548af7);
+  outline-offset: 1px;
+}
+
+.llm-set-local-scan-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.llm-set-local-scan-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--llm-radius-pill, 999px);
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: var(--llm-fs-10, 10px);
+  font-weight: 600;
+}
+
+.llm-set-local-scan-url {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.llm-set-local-scan-meta {
+  color: #6b7280;
+}
+
+/* ── Plugin theme surfaces ── */
+.llm-panel[data-composer-theme-surface="true"] .llm-set-nav {
+  background: var(--llm-theme-menu-bg, var(--material-background));
+  border-bottom-color: var(--llm-theme-border, var(--stroke-secondary));
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-set-nav-chip {
+  color: var(--llm-theme-chat-muted, var(--fill-secondary));
+  background: var(--llm-theme-chip-bg, var(--fill-quinary));
+  border-color: var(--llm-theme-border, var(--stroke-secondary));
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-set-nav-chip:hover {
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-set-nav-chip.is-active {
+  color: #ffffff;
+  background: var(--llm-theme-accent, var(--color-accent));
+  border-color: var(--llm-theme-accent, var(--color-accent));
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-set-section-head {
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-set-local-scan-row {
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+  background: var(--llm-theme-chip-bg, var(--fill-quinary));
+  border-color: var(--llm-theme-border, var(--stroke-secondary));
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-set-local-scan-row:hover {
+  border-color: var(--llm-theme-accent, var(--color-accent));
+  background: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 10%,
+    transparent
+  );
+}
+
+.llm-panel[data-composer-theme-surface="true"] .llm-set-local-scan-badge {
+  color: var(--llm-theme-accent, var(--color-accent));
+  background: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 14%,
+    transparent
+  );
+}
+
+.llm-panel[data-composer-theme-surface="true"]
+  :is(.llm-set-local-scan-meta, .llm-set-hotkey-accel) {
+  color: var(--llm-theme-chat-muted, var(--fill-tertiary));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Reading actions — the second action-bar menu
+ *
+ * The `+` button keeps only the ways to add context; everything that reads
+ * the paper for the user moved behind this button. The menu reuses the slash
+ * menu's surface (.llm-response-menu) and its group labels, so it inherits
+ * every composer theme without a second set of colour rules.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.llm-reading-actions-btn,
+.llm-reading-actions-btn.llm-action-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: var(--llm-action-height);
+  min-height: var(--llm-action-height);
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: 0;
+  font-weight: 600;
+  line-height: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.llm-reading-actions-btn::before {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 18px;
+  background-color: currentColor;
+  mask-image: url("icons/action-reading.svg");
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-image: url("icons/action-reading.svg");
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  pointer-events: none;
+}
+
+.llm-reading-actions-btn:hover:not(:disabled),
+.llm-reading-actions-btn:focus-visible {
+  background: var(--fill-quinary);
+  border-color: transparent;
+  border-radius: 8px;
+}
+
+.llm-reading-menu {
+  width: min(88vw, 300px);
+  max-width: min(90vw, 300px);
+  min-width: calc(190px * var(--llm-font-scale, 1));
+  /* positionFloatingMenu() writes an inline max-height from the space around
+   * the anchor and the panel clamps it again to this same cap; the rule here
+   * covers the first paint, before either has run. */
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  border-radius: var(--llm-radius-md, 10px);
+  box-shadow: var(--llm-elevation-3, 0 8px 24px -4px rgba(0, 0, 0, 0.08));
+}
+
+/* Section headers stay put while the list scrolls under them. The background
+ * is opaque on purpose — rows scroll underneath — and follows the composer
+ * theme the menu surface itself is painted with. */
+.llm-reading-menu .llm-slash-group-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--llm-theme-menu-bg, var(--material-background));
+}
+
+.llm-reading-menu .llm-response-menu-item {
+  white-space: normal;
+}
+
+.llm-reading-menu .llm-response-menu-item:focus-visible {
+  background: var(--fill-quinary);
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* ── Academic polishing submenu ── */
+.llm-reading-submenu-toggle {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.llm-reading-submenu-toggle::after {
+  content: "\25B8";
+  flex: 0 0 auto;
+  font-size: var(--llm-fs-10, 10px);
+  color: var(--fill-secondary);
+  transition: transform 0.12s ease;
+}
+
+.llm-reading-submenu-toggle[aria-expanded="true"]::after {
+  transform: rotate(90deg);
+}
+
+.llm-reading-submenu {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 2px calc(10px * var(--llm-font-scale, 1));
+  padding-left: calc(6px * var(--llm-font-scale, 1));
+  border-left: 1px solid var(--stroke-secondary);
+}
+
+.llm-reading-submenu[hidden] {
+  display: none;
+}
+
+.llm-reading-submenu-item {
+  color: var(--fill-secondary);
+}
+
+.llm-reading-submenu-item:hover {
+  color: var(--fill-primary);
+}
+
+/* ── Polishing diff, shown under the answer it belongs to ── */
+.llm-msg-diff-btn {
+  appearance: none;
+  -moz-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px 16px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h9'/%3E%3Cpath d='M8.5 4.5 4 7l4.5 2.5'/%3E%3Cpath d='M20 17h-9'/%3E%3Cpath d='m15.5 14.5 4.5 2.5-4.5 2.5'/%3E%3C/svg%3E");
+  border: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+  vertical-align: middle;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.llm-msg-diff-btn:hover,
+.llm-msg-diff-btn[aria-expanded="true"] {
+  opacity: 0.9;
+}
+
+.llm-polish-diff {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 4px 0 0;
+  padding: calc(8px * var(--llm-font-scale, 1))
+    calc(10px * var(--llm-font-scale, 1));
+  background: var(--llm-theme-chip-bg, var(--fill-quinary));
+  border: 1px solid var(--llm-theme-border, var(--stroke-secondary));
+  border-radius: var(--llm-radius-md, 10px);
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+  font-size: var(--llm-fs-12, 12px);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.llm-polish-diff[hidden] {
+  display: none;
+}
+
+/* The renderer's own inline colours are stripped on insert so these follow
+ * whichever Zotero theme the reader is actually using. */
+.llm-polish-diff ins,
+.llm-polish-diff .diff-ins {
+  text-decoration: none;
+  color: var(--fill-primary);
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  border-radius: 3px;
+}
+
+.llm-polish-diff del,
+.llm-polish-diff .diff-del {
+  text-decoration: line-through;
+  color: var(--fill-secondary);
+  background: color-mix(in srgb, var(--fill-tertiary) 24%, transparent);
+  border-radius: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Inline notice — one slot floating just above the composer
+   ═══════════════════════════════════════════════════════════ */
+.llm-notice {
+  --llm-notice-hue: var(--llm-theme-accent, var(--color-accent));
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--llm-notice-hue) 38%,
+      var(--llm-theme-border, var(--stroke-secondary))
+    );
+  border-radius: var(--llm-radius-md);
+  background: color-mix(
+    in srgb,
+    var(--llm-notice-hue) 10%,
+    var(--llm-theme-menu-bg, var(--material-background))
+  );
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+  font-size: var(--llm-fs-12);
+  line-height: 1.4;
+  box-shadow: var(--llm-elevation-3);
+}
+
+.llm-notice[hidden] {
+  display: none !important;
+}
+
+.llm-notice--success {
+  --llm-notice-hue: #2f9e44;
+}
+
+.llm-notice--warning {
+  --llm-notice-hue: #e8890c;
+}
+
+.llm-notice--error {
+  --llm-notice-hue: #e5484d;
+}
+
+.llm-notice-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--llm-radius-pill);
+  background: var(--llm-notice-hue);
+  color: #ffffff;
+  font-size: var(--llm-fs-11);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.llm-notice-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.llm-notice-actions {
+  flex: 0 1 auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.llm-notice-action {
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--llm-notice-hue) 45%,
+      var(--llm-theme-border, var(--stroke-secondary))
+    );
+  border-radius: var(--llm-radius-pill);
+  background: var(--llm-theme-menu-bg, var(--material-background));
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+  font-size: var(--llm-fs-11);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.llm-notice-action--primary {
+  border-color: var(--llm-notice-hue);
+  background: var(--llm-notice-hue);
+  color: #ffffff;
+}
+
+.llm-notice-action:hover {
+  background: color-mix(
+    in srgb,
+    var(--llm-notice-hue) 16%,
+    var(--llm-theme-menu-bg, var(--material-background))
+  );
+}
+
+.llm-notice-action--primary:hover {
+  background: color-mix(in srgb, var(--llm-notice-hue) 85%, #000000);
+}
+
+.llm-notice-close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--llm-radius-pill);
+  background: transparent;
+  color: var(--llm-theme-chat-muted, var(--fill-secondary));
+  font-size: var(--llm-fs-14);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.llm-notice-close:hover {
+  background: color-mix(in srgb, var(--fill-primary) 10%, transparent);
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+}
+
+.llm-notice-action:focus-visible,
+.llm-notice-close:focus-visible {
+  outline: 2px solid var(--llm-theme-accent, var(--color-accent));
+  outline-offset: 1px;
+}
+
+/* Keep the jump-to-bottom button clear of a visible notice. */
+.llm-chat-shell[data-notice-visible="true"] .llm-scroll-bottom-btn {
+  bottom: 64px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Empty-conversation guide
+   ═══════════════════════════════════════════════════════════ */
+.llm-welcome--guide {
+  gap: 4px;
+}
+
+.llm-welcome--guide .llm-welcome-icon {
+  margin-bottom: 6px;
+}
+
+.llm-empty-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  width: min(100%, 320px);
+  padding: 12px 14px;
+  border: 1px solid var(--llm-theme-border, var(--stroke-secondary));
+  border-radius: var(--llm-radius-lg);
+  background: var(--llm-theme-menu-bg, var(--material-background));
+  box-shadow: var(--llm-elevation-2);
+  text-align: start;
+}
+
+.llm-empty-guide-title {
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+  font-size: var(--llm-fs-13);
+  font-weight: 650;
+}
+
+.llm-empty-guide-intro {
+  color: var(--llm-theme-chat-muted, var(--fill-secondary));
+  font-size: var(--llm-fs-11);
+}
+
+.llm-empty-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.llm-empty-guide-entry {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--llm-theme-border, var(--stroke-secondary)) 80%,
+      transparent
+    );
+  border-radius: var(--llm-radius-sm);
+  background: var(--llm-theme-chip-bg, transparent);
+  color: var(--llm-theme-chat-fg, var(--fill-primary));
+  font-size: var(--llm-fs-12);
+  text-align: start;
+  cursor: pointer;
+}
+
+.llm-empty-guide-entry:hover {
+  border-color: var(--llm-theme-accent, var(--color-accent));
+  background: color-mix(
+    in srgb,
+    var(--llm-theme-accent, var(--color-accent)) 10%,
+    var(--llm-theme-menu-bg, var(--material-background))
+  );
+}
+
+.llm-empty-guide-entry:focus-visible {
+  outline: 2px solid var(--llm-theme-accent, var(--color-accent));
+  outline-offset: 1px;
+}
+
+.llm-empty-guide-hotkeys {
+  margin-top: 2px;
+  color: var(--llm-theme-chat-muted, var(--fill-tertiary));
+  font-size: var(--llm-fs-10);
+  line-height: 1.45;
 }

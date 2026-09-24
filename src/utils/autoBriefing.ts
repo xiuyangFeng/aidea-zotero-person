@@ -104,6 +104,54 @@ export function getAutoBriefingMode(): AutoBriefingMode {
   }
 }
 
+/**
+ * Store a briefing mode. Used by the "Don't auto-generate" button on the
+ * briefing notice. Returns false instead of throwing when no Zotero runtime
+ * is available, matching `getAutoBriefingMode`.
+ */
+export function setAutoBriefingMode(mode: AutoBriefingMode): boolean {
+  try {
+    const prefs = (globalThis as { Zotero?: { Prefs?: { set?: unknown } } })
+      .Zotero?.Prefs;
+    if (typeof prefs?.set !== "function") return false;
+    (prefs.set as (key: string, value: unknown, global?: boolean) => unknown)(
+      `${config.prefsPrefix}.${AUTO_BRIEFING_MODE_PREF_KEY}`,
+      normalizeAutoBriefingMode(mode),
+      true,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * How long a sent briefing may take to show up as a running request before
+ * the panel stops waiting for it. Sending is asynchronous (the send flow
+ * resolves context first), so "not generating" right after the click does
+ * not yet mean "finished".
+ */
+export const AUTO_BRIEFING_START_GRACE_MS = 15000;
+
+/**
+ * Whether the cancel notice of a sent briefing should come down.
+ *
+ * The notice stays while the request is starting or streaming, and goes once
+ * the request has been seen running and then stopped, the panel is gone, or
+ * the request never started within the grace period.
+ */
+export function isAutoBriefingRunOver(input: {
+  panelConnected: boolean;
+  generating: boolean;
+  sawGenerating: boolean;
+  elapsedMs: number;
+}): boolean {
+  if (!input.panelConnected) return true;
+  if (input.generating) return false;
+  if (input.sawGenerating) return true;
+  return input.elapsedMs >= AUTO_BRIEFING_START_GRACE_MS;
+}
+
 // ---------------------------------------------------------------------------
 // Prompt assembly
 // ---------------------------------------------------------------------------

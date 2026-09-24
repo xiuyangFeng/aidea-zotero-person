@@ -430,7 +430,7 @@ export function getSelectedProfileForItem(itemId: number): {
       key: "primary" as ModelProfileKey,
       apiBase: profiles.primary.apiBase,
       apiKey: profiles.primary.apiKey,
-      model: cachedValue,
+      model: resolveUsableModelName(cachedValue, profiles.primary),
     };
   }
 
@@ -454,7 +454,7 @@ export function getSelectedProfileForItem(itemId: number): {
       key: "primary" as ModelProfileKey,
       apiBase: profiles.primary.apiBase,
       apiKey: profiles.primary.apiKey,
-      model: persistedModelName,
+      model: resolveUsableModelName(persistedModelName, profiles.primary),
     };
   }
 
@@ -468,6 +468,63 @@ export function getSelectedProfileForItem(itemId: number): {
       ? preferredKey
       : "primary";
   return { key: selectedKey, ...profiles[selectedKey] };
+}
+
+/**
+ * How a remembered model name relates to the cached provider catalogue:
+ * `"listed"` — some provider still serves it; `"unlisted"` — the catalogue has
+ * models but not this one; `"no-catalogue"` — nothing has been fetched yet, so
+ * the catalogue says nothing either way.
+ */
+type CachedModelStanding = "listed" | "unlisted" | "no-catalogue";
+
+function getCachedModelStanding(modelName: string): CachedModelStanding {
+  const cacheRaw = getStringPref("oauthModelListCache").trim();
+  if (!cacheRaw) return "no-catalogue";
+  let modelCache: Record<string, Array<{ id?: unknown }>>;
+  try {
+    modelCache = JSON.parse(cacheRaw);
+    if (!modelCache || typeof modelCache !== "object") return "no-catalogue";
+  } catch {
+    return "no-catalogue";
+  }
+
+  const wanted = modelName.trim().toLowerCase();
+  let sawAnyModel = false;
+  for (const models of Object.values(modelCache)) {
+    if (!Array.isArray(models)) continue;
+    for (const row of models) {
+      const id = String(row?.id || "")
+        .trim()
+        .toLowerCase();
+      if (!id) continue;
+      sawAnyModel = true;
+      if (id === wanted) return "listed";
+    }
+  }
+  return sawAnyModel ? "unlisted" : "no-catalogue";
+}
+
+/**
+ * Pick the model name to actually send when `modelName` could not be resolved
+ * to a provider.
+ *
+ * A name the catalogue knows nothing about, while the catalogue itself is
+ * populated, is a leftover from a provider that has since been removed —
+ * sending it to whatever endpoint is configured now just earns a
+ * "model not found". Fall back to the model the primary profile carries.
+ *
+ * An empty catalogue means no model list was ever fetched (plain custom mode),
+ * and there the remembered name is the user's own deliberate pick — keep it.
+ */
+function resolveUsableModelName(
+  modelName: string,
+  primary: ApiProfile,
+): string {
+  const candidate = modelName.trim();
+  if (!candidate) return primary.model;
+  if (getCachedModelStanding(candidate) !== "unlisted") return candidate;
+  return primary.model || candidate;
 }
 
 /**

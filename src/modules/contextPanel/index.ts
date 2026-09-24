@@ -24,11 +24,9 @@
 import { getLocaleID } from "../../utils/locale";
 import { renderMarkdown } from "../../utils/markdown";
 import { getZoteroItem } from "../../utils/zoteroItems";
-import { config, GLOBAL_CONVERSATION_KEY_BASE, PANE_ID } from "./constants";
+import { config, PANE_ID } from "./constants";
 import type { Message } from "./types";
 import {
-  activeConversationModeByLibrary,
-  activeGlobalConversationByLibrary,
   chatHistory,
   loadedConversationKeys,
   readerContextPanelRegistered,
@@ -42,12 +40,10 @@ import {
   clearOwnerAttachmentRefs,
   collectAndDeleteUnreferencedBlobs,
 } from "../../utils/attachmentRefStore";
-import { normalizeSelectedText, sanitizeText, setStatus } from "./textUtils";
+import { normalizeSelectedText, sanitizeText } from "./textUtils";
 import { copyTextToClipboard, zoneBSummaryCache } from "./chat";
 import {
   getItemSelectionCacheKeys,
-  appendSelectedTextContextForItem,
-  applySelectedTextPreview,
   getActiveContextAttachmentFromTabs,
   getActiveReaderDocumentAttachmentFromTabs,
 } from "./contextResolution";
@@ -55,11 +51,16 @@ import {
   getFirstSelectionFromReader,
   getSelectionFromDocument,
 } from "./readerSelection";
-import { resolvePaperContextRefFromAttachment } from "./paperAttribution";
+import { getSharedReaderPanelHostForItem } from "./readerPanel";
 import {
-  bootstrapSharedReaderPanel,
-  getSharedReaderPanelHostForItem,
-} from "./readerPanel";
+  clearActiveSelectionPopupTranslate,
+  setActiveSelectionPopupTranslate,
+} from "./selectionPopupTranslate";
+import {
+  addSelectionTextToPanel,
+  dispatchReadingAction,
+  type ReadingActionKind,
+} from "./readingActions";
 import {
   bootstrapSharedLibraryPanel,
   getSharedLibraryPanelHost,
@@ -68,8 +69,15 @@ import {
   getLibrarySelectionStateFromWindow,
   isManagedLibraryPanelSectionEnabled,
 } from "./librarySelection";
-import { getPanelI18n } from "./i18n";
+import { getPanelI18n, getPanelLang } from "./i18n";
 import {
+  CAPSULE_ACTIONS,
+  recommendCapsuleActions,
+  type CapsuleActionKind,
+  type QuickCapsuleLang,
+} from "../../utils/quickCapsule";
+import {
+  isSelectionTranslateAutoEnabled,
   isSelectionTranslateBilingualEnabled,
   isSelectionTranslateEnabled,
   setSelectionTranslateBilingualEnabled,
@@ -844,280 +852,11 @@ export function registerReaderSelectionTracking() {
           ztoolkit.log("LLM: Add Text popup action skipped (no selection)");
           return;
         }
-        try {
-          let preferredPanelRoot: HTMLDivElement | null = null;
-          const readerWin = (event.doc.defaultView?.top ||
-            null) as Window | null;
-          if (readerWin && item) {
-            try {
-              const host = getSharedReaderPanelHostForItem(readerWin, item);
-              await bootstrapSharedReaderPanel(readerWin, host, item);
-              preferredPanelRoot = host.querySelector(
-                "#llm-main",
-              ) as HTMLDivElement | null;
-            } catch (err) {
-              ztoolkit.log(
-                "LLM: Add Text popup reader panel bootstrap failed",
-                err,
-              );
-            }
-          }
-
-          const docs = new Set<Document>();
-          const pushDoc = (doc?: Document | null) => {
-            if (doc) docs.add(doc);
-          };
-          pushDoc(event.doc);
-          pushDoc(event.doc.defaultView?.top?.document || null);
-          try {
-            pushDoc(Zotero.getMainWindow()?.document || null);
-          } catch (_err) {
-            void _err;
-          }
-          try {
-            const wins = Zotero.getMainWindows?.() || [];
-            for (const win of wins) {
-              pushDoc(win?.document || null);
-            }
-          } catch (_err) {
-            void _err;
-          }
-
-          const panelRoots: HTMLDivElement[] = [];
-          const seenRoots = new Set<Element>();
-          if (preferredPanelRoot) {
-            seenRoots.add(preferredPanelRoot);
-            panelRoots.push(preferredPanelRoot);
-          }
-          for (const doc of docs) {
-            const roots = Array.from(
-              doc.querySelectorAll("#llm-main"),
-            ) as HTMLDivElement[];
-            for (const root of roots) {
-              if (seenRoots.has(root)) continue;
-              seenRoots.add(root);
-              panelRoots.push(root);
-            }
-          }
-          if (!panelRoots.length) return;
-
-          const readerLibraryID = Number(item?.libraryID || 0);
-          const normalizedReaderLibraryID =
-            Number.isFinite(readerLibraryID) && readerLibraryID > 0
-              ? Math.floor(readerLibraryID)
-              : 0;
-          const readerModeLock =
-            normalizedReaderLibraryID > 0
-              ? activeConversationModeByLibrary.get(normalizedReaderLibraryID)
-              : null;
-          const readerGlobalConversationKey =
-            readerModeLock === "global" && normalizedReaderLibraryID > 0
-              ? Math.floor(
-                  Number(
-                    activeGlobalConversationByLibrary.get(
-                      normalizedReaderLibraryID,
-                    ) || 0,
-                  ),
-                )
-              : 0;
-          const readerPaperContext = resolvePaperContextRefFromAttachment(item);
-          const readerPaperConversationKey =
-            readerPaperContext && Number.isFinite(readerPaperContext.itemId)
-              ? Math.floor(readerPaperContext.itemId)
-              : 0;
-          const getPanelItemId = (root: HTMLDivElement): number | null => {
-            const parsed = Number(root.dataset.itemId || 0);
-            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-          };
-          const getPanelLibraryId = (root: HTMLDivElement): number | null => {
-            const parsed = Number(root.dataset.libraryId || 0);
-            return Number.isFinite(parsed) && parsed > 0
-              ? Math.floor(parsed)
-              : null;
-          };
-          const resolvePanelConversationKey = (
-            root: HTMLDivElement,
-            panelItemId: number | null,
-          ): number | null => {
-            if (!panelItemId) return null;
-            const libraryID = getPanelLibraryId(root);
-            if (libraryID) {
-              const mode = activeConversationModeByLibrary.get(libraryID);
-              if (mode === "global") {
-                const lockedGlobal = Number(
-                  activeGlobalConversationByLibrary.get(libraryID) || 0,
-                );
-                if (Number.isFinite(lockedGlobal) && lockedGlobal > 0) {
-                  return Math.floor(lockedGlobal);
-                }
-              }
-            }
-            if (
-              readerGlobalConversationKey > 0 &&
-              panelItemId < GLOBAL_CONVERSATION_KEY_BASE
-            ) {
-              return readerGlobalConversationKey;
-            }
-            return panelItemId;
-          };
-          const isVisible = (root: HTMLElement) =>
-            root.getClientRects().length > 0;
-          const popupTopDoc = event.doc.defaultView?.top?.document || null;
-          const rootStates = panelRoots
-            .map((root) => {
-              const ownerDoc = root.ownerDocument;
-              const panelItemId = getPanelItemId(root);
-              const panelLibraryId = getPanelLibraryId(root);
-              const conversationKey = resolvePanelConversationKey(
-                root,
-                panelItemId,
-              );
-              return {
-                root,
-                panelItemId,
-                panelLibraryId,
-                conversationKey,
-                visible: isVisible(root),
-                sameDoc: popupTopDoc ? ownerDoc === popupTopDoc : false,
-                sameLibrary:
-                  normalizedReaderLibraryID > 0 &&
-                  panelLibraryId === normalizedReaderLibraryID,
-                matchesReaderPaper:
-                  readerPaperConversationKey > 0 &&
-                  conversationKey === readerPaperConversationKey,
-                matchesLockedGlobal:
-                  readerGlobalConversationKey > 0 &&
-                  conversationKey === readerGlobalConversationKey,
-                hasActiveFocus: Boolean(
-                  ownerDoc?.activeElement &&
-                  root.contains(ownerDoc.activeElement),
-                ),
-                isPreferredReaderRoot: root === preferredPanelRoot,
-              };
-            })
-            .filter(
-              (state) => state.panelItemId !== null && state.conversationKey,
-            );
-          if (!rootStates.length) return;
-          const preferredStates = rootStates.filter(
-            (state) => state.isPreferredReaderRoot,
-          );
-          const sameLibraryStates =
-            normalizedReaderLibraryID > 0
-              ? rootStates.filter((state) => state.sameLibrary)
-              : [];
-          const rankedStates = preferredStates.length
-            ? preferredStates
-            : sameLibraryStates.length
-              ? sameLibraryStates
-              : rootStates;
-
-          // Deterministic status/focus target ranking:
-          // 1) same doc + visible + focused panel
-          // 2) visible + focused panel
-          // 3) same doc + visible + matching global lock
-          // 4) same doc + visible + matching reader paper
-          // 5) same doc + visible
-          // 6) visible + matching global lock
-          // 7) visible + matching reader paper
-          // 8) visible
-          // 9) same doc
-          // 10) focused panel
-          const scoreState = (state: (typeof rankedStates)[number]) => {
-            if (state.isPreferredReaderRoot) return 100;
-            if (state.sameDoc && state.visible && state.hasActiveFocus)
-              return 8;
-            if (state.visible && state.hasActiveFocus) return 7;
-            if (state.sameDoc && state.visible && state.matchesLockedGlobal)
-              return 6.5;
-            if (state.sameDoc && state.visible && state.matchesReaderPaper)
-              return 6;
-            if (state.sameDoc && state.visible) return 5;
-            if (state.visible && state.matchesLockedGlobal) return 4.5;
-            if (state.visible && state.matchesReaderPaper) return 4;
-            if (state.visible) return 3;
-            if (state.sameDoc) return 2;
-            if (state.hasActiveFocus) return 1;
-            return 0;
-          };
-          let bestState = rankedStates[0];
-          let bestScore = scoreState(bestState);
-          for (const state of rankedStates.slice(1)) {
-            const score = scoreState(state);
-            if (score > bestScore) {
-              bestState = state;
-              bestScore = score;
-            }
-          }
-
-          const panelRoot = bestState.root;
-          const conversationKey = bestState.conversationKey as number;
-          const isGlobalConversation =
-            conversationKey >= GLOBAL_CONVERSATION_KEY_BASE;
-          if (!isGlobalConversation) {
-            // Compare using the Zotero item/parent IDs, NOT the conversation
-            // key which is now in the paper-conversation numeric range.
-            const readerItemId = Number(item?.id || 0);
-            const readerParentId = Number(item?.parentID || 0);
-            const paperMismatch =
-              !readerPaperContext ||
-              (readerPaperContext.itemId !== readerItemId &&
-                readerPaperContext.itemId !== readerParentId);
-            if (paperMismatch) {
-              const panelBody = panelRoot.parentElement || panelRoot;
-              const status = panelBody.querySelector(
-                "#llm-status",
-              ) as HTMLElement | null;
-              if (status) {
-                setStatus(
-                  status,
-                  "Paper mode only accepts text from this paper",
-                  "error",
-                );
-              }
-              return;
-            }
-          }
-          const selectedPaperContext = isGlobalConversation
-            ? readerPaperContext
-            : null;
-          const added = appendSelectedTextContextForItem(
-            conversationKey,
-            effectiveSelectedText,
-            "pdf",
-            selectedPaperContext,
-          );
-          const refreshRoots = rootStates.filter(
-            (state) => (state.conversationKey as number) === conversationKey,
-          );
-          for (const state of refreshRoots) {
-            const panelBody = state.root.parentElement || state.root;
-            applySelectedTextPreview(panelBody, conversationKey);
-          }
-          if (!refreshRoots.length) {
-            const panelBody = panelRoot.parentElement || panelRoot;
-            applySelectedTextPreview(panelBody, conversationKey);
-          }
-          const panelBody = panelRoot.parentElement || panelRoot;
-          const status = panelBody.querySelector(
-            "#llm-status",
-          ) as HTMLElement | null;
-          if (status) {
-            setStatus(
-              status,
-              added ? "Selected text included" : "Text Context up to 5",
-              added ? "ready" : "error",
-            );
-          }
-          if (added) {
-            const inputEl = panelBody.querySelector(
-              "#llm-input",
-            ) as HTMLTextAreaElement | null;
-            inputEl?.focus({ preventScroll: true });
-          }
-        } catch (err) {
-          ztoolkit.log("LLM: Add Text popup action failed", err);
-        }
+        await addSelectionTextToPanel({
+          doc: event.doc,
+          item,
+          selectedText: effectiveSelectedText,
+        });
       };
       const stripPopupRowChrome = (
         row: HTMLElement | null,
@@ -1148,7 +887,284 @@ export function registerReaderSelectionTracking() {
         if (isSeparator(next)) next.style.display = "none";
       };
 
-      if (selectedText && isSelectionTranslateEnabled()) {
+      // ══ Quick-action capsule ══
+      // A compact row of reading actions, ordered by what the passage looks
+      // like (formula, algorithm, table, long sentence, term). The first three
+      // sit on one line; the rest hide behind "More" so a long selection can
+      // never widen the popup past the translation panel's own width budget.
+      const createPopupNode = <T extends HTMLElement>(
+        tag: string,
+        className: string,
+      ): T => {
+        const node = event.doc.createElementNS(
+          "http://www.w3.org/1999/xhtml",
+          tag,
+        ) as unknown as T;
+        node.className = className;
+        return node;
+      };
+      const stopPopupBubbling = (target: HTMLElement) => {
+        for (const eventName of [
+          "pointerdown",
+          "pointerup",
+          "mousedown",
+          "mouseup",
+          "click",
+        ]) {
+          target.addEventListener(eventName, (e: Event) => {
+            e.stopPropagation();
+          });
+        }
+      };
+      const quickActionsEnabled = isPopupOptionEnabled(
+        "selectionPopup.quickActions",
+      );
+      const selectionTranslateEnabled = isSelectionTranslateEnabled();
+      // "Translate on selection" off means the popup renders the translation
+      // panel but waits: nothing is sent until the reader asks for it.
+      const autoTranslateEnabled = isSelectionTranslateAutoEnabled();
+      // Assigned by the translation block below when it renders. Declared here
+      // so the capsule can drive a translation it is laid out above.
+      let runPopupSelectionTranslate: (() => Promise<void>) | null = null;
+      let revealSelectionTranslateWrap: (() => void) | null = null;
+      const triggerPopupTranslate = () => {
+        if (runPopupSelectionTranslate) {
+          revealSelectionTranslateWrap?.();
+          void runPopupSelectionTranslate();
+          return;
+        }
+        // Selection translation is switched off entirely — fall back to the
+        // panel, which answers in the conversation instead of the popup.
+        const fallbackText =
+          normalizeSelectedText(selectedText) ||
+          resolveSelectedTextForPopupAction();
+        if (!fallbackText) return;
+        void dispatchReadingAction({
+          kind: "translate",
+          selectedText: fallbackText,
+          readerItem: item,
+          doc: event.doc,
+        }).catch((err) => {
+          ztoolkit.log("LLM: popup translate fallback failed", err);
+        });
+      };
+      const runPopupReadingAction = (kind: ReadingActionKind) => {
+        if (kind === "translate") {
+          triggerPopupTranslate();
+          return;
+        }
+        const actionText =
+          normalizeSelectedText(selectedText) ||
+          resolveSelectedTextForPopupAction();
+        if (!actionText) return;
+        void dispatchReadingAction({
+          kind,
+          selectedText: actionText,
+          readerItem: item,
+          doc: event.doc,
+        })
+          .then((result) => {
+            if (result.outcome === "no-panel") {
+              ztoolkit.log(
+                `LLM: quick action "${kind}" found no AIdea panel to send to`,
+              );
+            }
+          })
+          .catch((err) => {
+            ztoolkit.log(`LLM: quick action "${kind}" failed`, err);
+          });
+      };
+      const createPopupActionButton = (
+        label: string,
+        title: string,
+        onActivate: () => void,
+      ): HTMLButtonElement => {
+        const button = createPopupNode<HTMLButtonElement>(
+          "button",
+          "llm-selection-quick-action",
+        );
+        button.type = "button";
+        button.textContent = label;
+        button.title = title;
+        button.setAttribute("aria-label", title);
+        button.style.cssText = [
+          "flex:0 0 auto",
+          "margin:0",
+          "padding:4px 8px",
+          "box-sizing:border-box",
+          "border:1px solid rgba(130,130,130,0.38)",
+          "border-radius:6px",
+          "background:rgba(127,127,127,0.08)",
+          // Inherit so the label stays readable in both reader themes.
+          "color:inherit",
+          "font-size:12px",
+          "line-height:1.25",
+          "text-align:center",
+          "white-space:nowrap",
+          "cursor:pointer",
+        ].join(";");
+        // Reader popup rows can be torn down on the focus shift before "click"
+        // would ever arrive, so the pointer press is the primary trigger — and
+        // preventing its default keeps the reader's selection intact, which is
+        // the very text these actions are about to send.
+        //
+        // pointerdown and mousedown are two reports of one press; the flag
+        // collapses them and then swallows the click that completes the same
+        // gesture. It is cleared each time, so a button that stays on screen
+        // (the More toggle) can be pressed again and again.
+        let pointerActivated = false;
+        const run = (e: Event) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onActivate();
+        };
+        const onPointerPress = (e: Event) => {
+          const maybeMouse = e as MouseEvent;
+          if (typeof maybeMouse.button === "number" && maybeMouse.button !== 0)
+            return;
+          // "pointerdown" always opens a new gesture; a "mousedown" that
+          // follows one is the same press reported twice.
+          if (pointerActivated && e.type !== "pointerdown") {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          pointerActivated = true;
+          run(e);
+        };
+        button.addEventListener("pointerdown", onPointerPress);
+        button.addEventListener("mousedown", onPointerPress);
+        button.addEventListener("click", (e: Event) => {
+          if (pointerActivated) {
+            pointerActivated = false;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          // Keyboard activation produces a click with no press before it.
+          run(e);
+        });
+        return button;
+      };
+      const buildQuickActionCapsule = (): HTMLDivElement | null => {
+        const capsuleText = normalizeSelectedText(selectedText);
+        if (!capsuleText) return null;
+        const capsuleLang: QuickCapsuleLang = getPanelLang().startsWith("zh")
+          ? "zh-CN"
+          : "en-US";
+        const typography = getPanelTypographySettings();
+        const container = createPopupNode<HTMLDivElement>(
+          "div",
+          "llm-selection-quick-actions",
+        );
+        container.style.cssText = [
+          "display:flex",
+          "flex-direction:column",
+          "gap:4px",
+          "width:100%",
+          `max-width:min(${typography.selectionPopupWidth}px, calc(100vw - 20px))`,
+          "box-sizing:border-box",
+          "margin:0",
+          "padding:2px 0",
+          "color:inherit",
+        ].join(";");
+        applyCurrentThemeToRoot(container);
+        stopPopupBubbling(container);
+
+        const rowStyle = (display: "flex" | "none") =>
+          [
+            `display:${display}`,
+            "flex-wrap:wrap",
+            "align-items:center",
+            "gap:4px",
+            "width:100%",
+            "box-sizing:border-box",
+          ].join(";");
+        const primaryRow = createPopupNode<HTMLDivElement>(
+          "div",
+          "llm-selection-quick-actions-row",
+        );
+        primaryRow.style.cssText = rowStyle("flex");
+        const overflowRow = createPopupNode<HTMLDivElement>(
+          "div",
+          "llm-selection-quick-actions-row",
+        );
+        overflowRow.style.cssText = rowStyle("none");
+
+        const recommended = recommendCapsuleActions(capsuleText);
+        // With automatic translation off, the translate button is the one the
+        // reader came here to press — it must not end up behind "More".
+        const ordered =
+          selectionTranslateEnabled && !autoTranslateEnabled
+            ? ([
+                "translate",
+                ...recommended.filter((kind) => kind !== "translate"),
+              ] as CapsuleActionKind[])
+            : recommended;
+        const primaryKinds = ordered.slice(0, 3);
+        const overflowKinds = ordered.slice(3);
+        const appendActionButton = (
+          row: HTMLDivElement,
+          kind: CapsuleActionKind,
+        ) => {
+          const definition = CAPSULE_ACTIONS[kind];
+          row.appendChild(
+            createPopupActionButton(
+              `${definition.icon} ${definition.label[capsuleLang]}`,
+              definition.description[capsuleLang],
+              () => runPopupReadingAction(kind),
+            ),
+          );
+        };
+        for (const kind of primaryKinds) appendActionButton(primaryRow, kind);
+        for (const kind of overflowKinds) appendActionButton(overflowRow, kind);
+
+        container.appendChild(primaryRow);
+        if (overflowKinds.length) {
+          let overflowVisible = false;
+          const moreBtn = createPopupActionButton(
+            `${i18n.quickActionsMore} ▾`,
+            i18n.quickActionsMore,
+            () => {
+              overflowVisible = !overflowVisible;
+              overflowRow.style.display = overflowVisible ? "flex" : "none";
+              const label = overflowVisible
+                ? `${i18n.quickActionsLess} ▴`
+                : `${i18n.quickActionsMore} ▾`;
+              moreBtn.textContent = label;
+              moreBtn.title = overflowVisible
+                ? i18n.quickActionsLess
+                : i18n.quickActionsMore;
+              moreBtn.setAttribute("aria-expanded", String(overflowVisible));
+              // The popup grew or shrank by a row; let the translation layout
+              // re-measure so it never overlaps the selection.
+              selectionTranslateContentChanged?.(true);
+              selectionTranslateRelayout?.();
+            },
+          );
+          moreBtn.setAttribute("aria-expanded", "false");
+          primaryRow.appendChild(moreBtn);
+          container.appendChild(overflowRow);
+        }
+        container.setAttribute("role", "group");
+        container.setAttribute("aria-label", i18n.quickActionsTitle);
+        return container;
+      };
+
+      if (selectedText && quickActionsEnabled) {
+        try {
+          const capsule = buildQuickActionCapsule();
+          if (capsule) {
+            event.append(capsule);
+            if (!popupSentinelEl) popupSentinelEl = capsule;
+            stripPopupRowChrome(capsule.parentElement as HTMLElement | null);
+          }
+        } catch (err) {
+          ztoolkit.log("LLM: failed to append quick action capsule", err);
+        }
+      }
+
+      if (selectedText && selectionTranslateEnabled) {
         try {
           const i18n = getPanelI18n();
           const text = {
@@ -1543,9 +1559,27 @@ export function registerReaderSelectionTracking() {
           if (showCopyButton) actionRow.appendChild(copyBtn);
           if (showAddToNoteButton) actionRow.appendChild(addToNoteBtn);
           wrap.append(toolbar, sourceBox, resultBox, actionRow);
+          if (!autoTranslateEnabled && !quickActionsEnabled) {
+            // No capsule to carry the action, so the popup needs a button of
+            // its own or the translation would be unreachable.
+            const manualTranslateBtn = createPopupActionButton(
+              i18n.selectionTranslateAction,
+              i18n.selectionTranslateManualHint,
+              () => triggerPopupTranslate(),
+            );
+            manualTranslateBtn.style.flex = "1 1 auto";
+            manualTranslateBtn.style.width = "100%";
+            event.append(manualTranslateBtn);
+            if (!popupSentinelEl) popupSentinelEl = manualTranslateBtn;
+            stripPopupRowChrome(
+              manualTranslateBtn.parentElement as HTMLElement | null,
+            );
+          }
+          if (!autoTranslateEnabled) wrap.style.display = "none";
           event.append(wrap);
           if (!popupSentinelEl) popupSentinelEl = wrap;
-          stripPopupRowChrome(wrap.parentElement as HTMLElement | null);
+          const wrapRow = wrap.parentElement as HTMLElement | null;
+          stripPopupRowChrome(wrapRow, !autoTranslateEnabled);
           const popupWin = event.doc.defaultView;
           let contentSizeRevision = 0;
           const runOnNextPopupFrame = (callback: () => void) => {
@@ -1555,6 +1589,10 @@ export function registerReaderSelectionTracking() {
               setTimeout(callback, 0);
             }
           };
+          // While the panel is waiting to be asked for a translation it is
+          // display:none, and measuring it would collapse the popup around a
+          // zero-sized box — including the capsule row above it.
+          const isTranslateWrapHidden = () => wrap.style.display === "none";
           selectionTranslateRelayout = () =>
             scheduleSelectionTranslateLayout({
               scheduleFrame: runOnNextPopupFrame,
@@ -1570,6 +1608,7 @@ export function registerReaderSelectionTracking() {
                 minimumHeight: minimumResultHeight,
               }),
               applyLayout(state) {
+                if (isTranslateWrapHidden()) return;
                 if (!resizeActive) layoutSelectionTranslatePopup(state);
               },
             });
@@ -1581,6 +1620,7 @@ export function registerReaderSelectionTracking() {
               if (
                 revision !== contentSizeRevision ||
                 !wrap.isConnected ||
+                isTranslateWrapHidden() ||
                 resizeActive
               ) {
                 return;
@@ -2073,7 +2113,23 @@ export function registerReaderSelectionTracking() {
               translateRunning = false;
             }
           };
-          setTimeout(() => void runSelectionTranslate(), 0);
+          runPopupSelectionTranslate = runSelectionTranslate;
+          setActiveSelectionPopupTranslate({
+            node: wrap,
+            reveal: () => revealSelectionTranslateWrap?.(),
+            run: runSelectionTranslate,
+          });
+          revealSelectionTranslateWrap = () => {
+            if (wrap.style.display !== "none") return;
+            wrap.style.display = "flex";
+            if (wrapRow) wrapRow.style.display = "";
+            stripPopupRowChrome(wrapRow);
+            selectionTranslateContentChanged?.();
+            selectionTranslateRelayout?.();
+          };
+          if (autoTranslateEnabled) {
+            setTimeout(() => void runSelectionTranslate(), 0);
+          }
         } catch (err) {
           ztoolkit.log("LLM: failed to append selection translate popup", err);
         }
@@ -2185,11 +2241,13 @@ export function registerReaderSelectionTracking() {
               // Popup never made it into the DOM — dispose its typography
               // refresh listeners instead of waiting for a refresh event.
               selectionTypographyCleanupByEvent.get(event)?.();
+              clearActiveSelectionPopupTranslate();
               return;
             }
             // Popup is gone — dispose its typography refresh listeners and
             // drop the recent-selection cache entries for it.
             selectionTypographyCleanupByEvent.get(event)?.();
+            clearActiveSelectionPopupTranslate();
             for (const key of keys) {
               if (recentReaderSelectionCache.get(key) === selectedText) {
                 recentReaderSelectionCache.delete(key);

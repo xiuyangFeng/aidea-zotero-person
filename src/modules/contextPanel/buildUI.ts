@@ -17,6 +17,7 @@ import {
   createChatReadinessPrompt,
 } from "./buildUI/primitives";
 import { buildTranslatePanel } from "./buildUI/translatePanel";
+import { createNoticeSlot } from "./notice";
 
 type PanelTab = "discussion" | "translate" | "setting";
 
@@ -301,7 +302,11 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
       title: i18n.scrollToBottom,
     },
   );
-  chatShell.append(chatBox, chatReadinessEmpty, scrollBottomBtn);
+  // Inline notice: floats over the bottom of the chat, just above the
+  // composer, so it never changes the height of the linked bottom wrapper.
+  const noticeSlot = createNoticeSlot(doc);
+  noticeSlot.setAttribute("aria-label", i18n.noticeRegionLabel);
+  chatShell.append(chatBox, chatReadinessEmpty, scrollBottomBtn, noticeSlot);
   discussionPanel.appendChild(chatShell);
 
   contentWrapper.appendChild(discussionPanel);
@@ -468,6 +473,25 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   exportMenu.append(exportMenuCopyBtn, exportMenuNoteBtn);
   container.appendChild(exportMenu);
 
+  const makeMenuGroupLabel = (textContent: string) =>
+    createElement(doc, "div", "llm-slash-group-label", { textContent });
+  const makeMenuOption = (
+    id: string,
+    textContent: string,
+    dataset?: Record<string, string>,
+  ) => {
+    const button = createElement(doc, "button", "llm-response-menu-item", {
+      id,
+      type: "button",
+      textContent,
+    });
+    for (const [key, value] of Object.entries(dataset || {})) {
+      button.dataset[key] = value;
+    }
+    return button;
+  };
+
+  // ── `+` menu: only ways to put something into the next request ──
   const slashMenu = createElement(
     doc,
     "div",
@@ -477,157 +501,215 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     },
   );
   slashMenu.style.display = "none";
-  const slashUploadBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-upload-option",
-      type: "button",
-      textContent: i18n.uploadFiles,
-    },
+  slashMenu.setAttribute("role", "menu");
+  const slashUploadBtn = makeMenuOption(
+    "llm-slash-upload-option",
+    i18n.uploadFiles,
   );
-  const slashReferenceBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-reference-option",
-      type: "button",
-      textContent: i18n.selectReferences,
-    },
+  const slashReferenceBtn = makeMenuOption(
+    "llm-slash-reference-option",
+    i18n.selectReferences,
   );
-  const slashLibraryBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-library-option",
-      type: "button",
-      textContent: i18n.addSelectedLibraryItems,
-    },
+  const slashLibraryBtn = makeMenuOption(
+    "llm-slash-library-option",
+    i18n.addSelectedLibraryItems,
   );
-  const slashAnnotationsBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-annotations-option",
-      type: "button",
-      textContent: i18n.addMyAnnotations,
-    },
+  const slashAnnotationsBtn = makeMenuOption(
+    "llm-slash-annotations-option",
+    i18n.addMyAnnotations,
   );
-  const slashAnnotationSummaryBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-annotation-summary-option",
-      type: "button",
-      textContent: i18n.summarizeMyAnnotations,
-    },
-  );
-  const slashPaperBriefingBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-paper-briefing-option",
-      type: "button",
-      textContent: i18n.generatePaperBriefing,
-    },
-  );
-  const slashReadingCardBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-reading-card-option",
-      type: "button",
-      textContent: i18n.generateReadingCard,
-    },
-  );
-  const slashFigureNavigatorBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-figure-navigator-option",
-      type: "button",
-      textContent: i18n.figureNavigator,
-    },
-  );
-  const slashCitationInsightBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-citation-insight-option",
-      type: "button",
-      textContent: i18n.explainSelectedCitations,
-    },
-  );
-  const slashConceptExtractBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-concept-extract-option",
-      type: "button",
-      textContent: i18n.extractConceptCards,
-    },
-  );
-  const slashConceptRecordBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-concept-record-option",
-      type: "button",
-      textContent: i18n.recordConceptCard,
-    },
-  );
-  const slashGlossaryExportBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-glossary-export-option",
-      type: "button",
-      textContent: i18n.exportGlossary,
-    },
-  );
-  const slashWritingDraftBtn = createElement(
-    doc,
-    "button",
-    "llm-response-menu-item",
-    {
-      id: "llm-slash-writing-draft-option",
-      type: "button",
-      textContent: i18n.exportWritingDraft,
-    },
-  );
-  const makeSlashGroupLabel = (textContent: string) =>
-    createElement(doc, "div", "llm-slash-group-label", { textContent });
   slashMenu.append(
-    makeSlashGroupLabel(i18n.slashGroupContext),
+    makeMenuGroupLabel(i18n.slashGroupContext),
     slashUploadBtn,
     slashReferenceBtn,
     slashLibraryBtn,
     slashAnnotationsBtn,
-    makeSlashGroupLabel(i18n.slashGroupReading),
-    slashPaperBriefingBtn,
-    slashAnnotationSummaryBtn,
-    slashReadingCardBtn,
-    slashFigureNavigatorBtn,
-    slashCitationInsightBtn,
-    slashConceptExtractBtn,
-    slashConceptRecordBtn,
-    makeSlashGroupLabel(i18n.slashGroupExport),
-    slashGlossaryExportBtn,
-    slashWritingDraftBtn,
   );
   container.appendChild(slashMenu);
+
+  // ── Reading menu: everything that reads the paper for the user ──
+  //
+  // Five sections, from "tell me about the whole paper" down to "act on what
+  // I just selected". Rows moved here from the `+` menu keep their original
+  // element ids, so the handlers that own them are untouched.
+  const readingMenu = createElement(
+    doc,
+    "div",
+    "llm-response-menu llm-reading-menu",
+    {
+      id: "llm-reading-menu",
+    },
+  );
+  readingMenu.style.display = "none";
+  readingMenu.setAttribute("role", "menu");
+
+  const readingPaperBriefingBtn = makeMenuOption(
+    "llm-slash-paper-briefing-option",
+    i18n.generatePaperBriefing,
+  );
+  const readingCardBtn = makeMenuOption(
+    "llm-slash-reading-card-option",
+    i18n.generateReadingCard,
+  );
+  const readingFigureNavigatorBtn = makeMenuOption(
+    "llm-slash-figure-navigator-option",
+    i18n.figureNavigator,
+  );
+  const readingPaperToCodeBtn = makeMenuOption(
+    "llm-reading-paper-to-code-option",
+    i18n.paperToCode,
+  );
+
+  const readingExplainBtn = makeMenuOption(
+    "llm-reading-explain-option",
+    i18n.readingActionExplain,
+    { readingKind: "explain" },
+  );
+  const readingDissectBtn = makeMenuOption(
+    "llm-reading-dissect-option",
+    i18n.readingActionDissect,
+    { readingKind: "dissect" },
+  );
+  const readingFormulaBtn = makeMenuOption(
+    "llm-reading-formula-option",
+    i18n.readingActionFormula,
+    { readingKind: "formula" },
+  );
+  const readingAlgorithmBtn = makeMenuOption(
+    "llm-reading-algorithm-option",
+    i18n.readingActionAlgorithm,
+    { readingKind: "algorithm" },
+  );
+  const readingTableBtn = makeMenuOption(
+    "llm-reading-table-option",
+    i18n.readingActionTable,
+    { readingKind: "table" },
+  );
+  const readingReviewBtn = makeMenuOption(
+    "llm-reading-review-option",
+    i18n.readingActionReview,
+    { readingKind: "review" },
+  );
+  const readingCitationInsightBtn = makeMenuOption(
+    "llm-slash-citation-insight-option",
+    i18n.explainSelectedCitations,
+  );
+
+  const readingCriticalReviewBtn = makeMenuOption(
+    "llm-reading-critical-review-option",
+    i18n.criticalReviewWholeDocument,
+  );
+  const readingSynthesisMatrixBtn = makeMenuOption(
+    "llm-reading-synthesis-matrix-option",
+    i18n.synthesisMatrixGenerate,
+  );
+  const readingPolishToggleBtn = createElement(
+    doc,
+    "button",
+    "llm-response-menu-item llm-reading-submenu-toggle",
+    {
+      id: "llm-reading-polish-toggle",
+      type: "button",
+      textContent: i18n.academicPolishing,
+    },
+  );
+  readingPolishToggleBtn.setAttribute("aria-haspopup", "true");
+  readingPolishToggleBtn.setAttribute("aria-expanded", "false");
+  readingPolishToggleBtn.setAttribute(
+    "aria-controls",
+    "llm-reading-polish-submenu",
+  );
+  const readingPolishSubmenu = createElement(
+    doc,
+    "div",
+    "llm-reading-submenu",
+    {
+      id: "llm-reading-polish-submenu",
+    },
+  );
+  readingPolishSubmenu.hidden = true;
+  const makePolishOption = (id: string, label: string, mode: string) => {
+    const button = createElement(
+      doc,
+      "button",
+      "llm-response-menu-item llm-reading-submenu-item",
+      { id, type: "button", textContent: label },
+    );
+    button.dataset.polishMode = mode;
+    return button;
+  };
+  readingPolishSubmenu.append(
+    makePolishOption(
+      "llm-reading-polish-academic-tone-option",
+      i18n.polishModeAcademicTone,
+      "academic-tone",
+    ),
+    makePolishOption(
+      "llm-reading-polish-conciseness-option",
+      i18n.polishModeConciseness,
+      "conciseness",
+    ),
+    makePolishOption(
+      "llm-reading-polish-clarity-option",
+      i18n.polishModeClarity,
+      "clarity-coherence",
+    ),
+    makePolishOption(
+      "llm-reading-polish-reviewer-option",
+      i18n.polishModeReviewerResponse,
+      "reviewer-response",
+    ),
+  );
+
+  const readingConceptExtractBtn = makeMenuOption(
+    "llm-slash-concept-extract-option",
+    i18n.extractConceptCards,
+  );
+  const readingConceptRecordBtn = makeMenuOption(
+    "llm-slash-concept-record-option",
+    i18n.recordConceptCard,
+  );
+  const readingGlossaryExportBtn = makeMenuOption(
+    "llm-slash-glossary-export-option",
+    i18n.exportGlossary,
+  );
+  const readingWritingDraftBtn = makeMenuOption(
+    "llm-slash-writing-draft-option",
+    i18n.exportWritingDraft,
+  );
+  const readingAnnotationSummaryBtn = makeMenuOption(
+    "llm-slash-annotation-summary-option",
+    i18n.summarizeMyAnnotations,
+  );
+
+  readingMenu.append(
+    makeMenuGroupLabel(i18n.readingGroupOverview),
+    readingPaperBriefingBtn,
+    readingCardBtn,
+    readingFigureNavigatorBtn,
+    readingPaperToCodeBtn,
+    makeMenuGroupLabel(i18n.readingGroupSelection),
+    readingExplainBtn,
+    readingDissectBtn,
+    readingFormulaBtn,
+    readingAlgorithmBtn,
+    readingTableBtn,
+    readingReviewBtn,
+    readingCitationInsightBtn,
+    makeMenuGroupLabel(i18n.readingGroupDeep),
+    readingCriticalReviewBtn,
+    readingSynthesisMatrixBtn,
+    readingPolishToggleBtn,
+    readingPolishSubmenu,
+    makeMenuGroupLabel(i18n.readingGroupConcepts),
+    readingConceptExtractBtn,
+    readingConceptRecordBtn,
+    readingGlossaryExportBtn,
+    readingWritingDraftBtn,
+    makeMenuGroupLabel(i18n.readingGroupAnnotations),
+    readingAnnotationSummaryBtn,
+  );
+  container.appendChild(readingMenu);
 
   // Figure navigator — the document's Figure/Table captions as a jump list.
   // Built empty and filled on open, like the history and model menus.

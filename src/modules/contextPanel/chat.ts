@@ -1,4 +1,11 @@
 import { renderMarkdownForNote } from "../../utils/markdown";
+import {
+  computeWordDiff,
+  isPolishingAnswerText,
+  renderDiffHtml,
+  splitPolishingAnswer,
+  tokenizeForDiff,
+} from "../../utils/academicPolishing";
 import { getZoteroItem } from "../../utils/zoteroItems";
 import {
   findAssistantBubbleByMessageId,
@@ -97,6 +104,8 @@ import {
   suspendScrollUpdates,
   resumeScrollUpdates,
 } from "./chatScroll";
+import { buildEmptyConversationGuide } from "./emptyGuide";
+import { describeConfiguredHotkey } from "./hotkeyPrefs";
 import {
   normalizeSelectedTextPaperContexts as normalizeSelectedTextPaperContextEntries,
   normalizeSelectedTextSources,
@@ -378,6 +387,80 @@ function collectAttachmentHashesFromStoredMessages(
 
 function getMessageSelectedTexts(message: Message): string[] {
   return normalizeSelectedTexts(message.selectedTexts, message.selectedText);
+}
+
+/**
+ * The text a polishing answer was asked to rewrite.
+ *
+ * The polishing action pins the source passage onto the user turn it is about
+ * to send, so the original travels with the conversation and survives a
+ * restart. It is pinned last, which is why the newest selected text of the
+ * preceding user message wins: an older pin belongs to some earlier question.
+ */
+export function resolvePolishingOriginalText(
+  history: readonly Message[],
+  assistantIndex: number,
+): string {
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const candidate = history[index];
+    if (!candidate) break;
+    if (candidate.role !== "user") continue;
+    const texts = getMessageSelectedTexts(candidate);
+    for (let textIndex = texts.length - 1; textIndex >= 0; textIndex -= 1) {
+      const text = (texts[textIndex] || "").trim();
+      if (text) return text;
+    }
+    return "";
+  }
+  return "";
+}
+
+/**
+ * Widest diff worth computing, in cells of the LCS matrix.
+ *
+ * The diff is an O(n·m) dynamic program over word tokens. A paragraph against
+ * a paragraph is instant; a whole chapter against a whole chapter would freeze
+ * the panel, so an oversized pair is refused rather than attempted.
+ */
+const MAX_POLISHING_DIFF_CELLS = 4_000_000;
+
+/**
+ * Fill a container with the word-level diff between two texts.
+ *
+ * `renderDiffHtml` escapes every character it did not write itself, so its
+ * output is exactly as safe as the escaped markdown the bubbles already carry.
+ * Its inline colours are stripped afterwards: they are a light-theme guess,
+ * and the panel's own `.diff-ins` / `.diff-del` rules follow the Zotero theme
+ * the reader actually chose.
+ *
+ * Returns false when no diff could be built, which the caller reports instead
+ * of opening an empty panel.
+ */
+export function renderPolishingDiff(
+  container: HTMLElement,
+  original: string,
+  revised: string,
+): boolean {
+  const from = String(original || "").trim();
+  const to = String(revised || "").trim();
+  if (!from || !to) return false;
+  if (
+    tokenizeForDiff(from).length * tokenizeForDiff(to).length >
+    MAX_POLISHING_DIFF_CELLS
+  ) {
+    return false;
+  }
+  try {
+    container.innerHTML = renderDiffHtml(computeWordDiff(from, to));
+  } catch (err) {
+    ztoolkit.log("LLM: polishing diff render failed", err);
+    container.textContent = to;
+    return true;
+  }
+  container.querySelectorAll("ins, del").forEach((node: Element) => {
+    node.removeAttribute("style");
+  });
+  return true;
 }
 
 type UserContextPopoverDisplay = "block" | "flex" | "grid";
@@ -3480,6 +3563,55 @@ function assistantRenderCacheKey(
   return Number.isFinite(msg?.messageId) ? `aidea:md:${msg!.messageId}` : null;
 }
 
+/** Hotkeys line for the empty-conversation guide, or `""` if unavailable. */
+function formatEmptyGuideHotkeyHint(i18n: ReturnType<typeof getPanelI18n>) {
+  try {
+    const focus = describeConfiguredHotkey("focusComposer");
+    const ask = describeConfiguredHotkey("askSelection");
+    const translate = describeConfiguredHotkey("translateSelection");
+    if (!focus && !ask && !translate) return "";
+    return i18n.emptyGuideHotkeys(focus || "—", ask || "—", translate || "—");
+  } catch (err) {
+    ztoolkit.log("LLM: empty guide hotkey hint failed", err);
+    return "";
+  }
+}
+
+/**
+ * An empty conversation: the logo plus a guide card of starting points. The
+ * card lives inside `.llm-welcome`, so it hides together with the logo while
+ * the "no model configured" prompt is up.
+ */
+function renderEmptyConversation(
+  body: Element,
+  chatBox: HTMLDivElement,
+  isGlobalConversation: boolean,
+) {
+  const doc = body.ownerDocument!;
+  const i18n = getPanelI18n();
+  chatBox.textContent = "";
+  const welcome = doc.createElement("div") as HTMLDivElement;
+  welcome.className = "llm-welcome llm-welcome--guide";
+  const logo = doc.createElement("div") as HTMLDivElement;
+  logo.className = "llm-welcome-icon";
+  logo.textContent = "AIdea";
+  welcome.appendChild(logo);
+  const tabHost = (body as HTMLElement).closest?.(
+    "[data-tab-type]",
+  ) as HTMLElement | null;
+  welcome.appendChild(
+    buildEmptyConversationGuide(doc, {
+      context: {
+        hasPaper: !isGlobalConversation,
+        isReader: tabHost?.dataset.tabType === "reader",
+      },
+      i18n,
+      hotkeyHint: formatEmptyGuideHotkeyHint(i18n),
+    }),
+  );
+  chatBox.appendChild(welcome);
+}
+
 export function refreshChat(body: Element, item?: Zotero.Item | null) {
   const chatBox = body.querySelector("#llm-chat-box") as HTMLDivElement | null;
   if (!chatBox) return;
@@ -3521,11 +3653,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
   const history = chatHistory.get(conversationKey) || [];
 
   if (history.length === 0) {
-    chatBox.innerHTML = `
-      <div class="llm-welcome">
-        <div class="llm-welcome-icon">AIdea</div>
-      </div>
-    `;
+    renderEmptyConversation(body, chatBox, isGlobalConversation);
     return;
   }
 
@@ -3546,6 +3674,8 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
       canShowEditUserMessage && !hasStreamingMessage,
     );
     let hasUserContext = false;
+    // Filled in for assistant answers that respond to a polishing request.
+    let polishDiffPanel: HTMLDivElement | null = null;
     const wrapper = doc.createElement("div") as HTMLDivElement;
     wrapper.className = `llm-message-wrapper ${isUser ? "user" : "assistant"}`;
     if (Number.isFinite(msg.messageId)) {
@@ -4440,6 +4570,30 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
           noteBtn.dataset.messageId = String(msg.messageId);
         }
         meta.appendChild(noteBtn);
+
+        // A polishing answer can be read against the passage it rewrote. The
+        // toggle only appears once both halves exist: the answer must carry
+        // the polishing title, and the turn it answers must still hold the
+        // original text.
+        if (
+          !msg.streaming &&
+          isPolishingAnswerText(msg.text) &&
+          resolvePolishingOriginalText(history, index) &&
+          splitPolishingAnswer(msg.text).revised
+        ) {
+          const diffBtn = doc.createElement("button") as HTMLButtonElement;
+          diffBtn.type = "button";
+          diffBtn.className = "llm-msg-diff-btn";
+          diffBtn.title = i18n.showPolishingDiff;
+          diffBtn.setAttribute("aria-label", i18n.showPolishingDiff);
+          diffBtn.setAttribute("aria-expanded", "false");
+          diffBtn.dataset.msgIndex = String(index);
+          meta.appendChild(diffBtn);
+
+          polishDiffPanel = doc.createElement("div") as HTMLDivElement;
+          polishDiffPanel.className = "llm-polish-diff";
+          polishDiffPanel.hidden = true;
+        }
       }
     }
 
@@ -4494,6 +4648,7 @@ export function refreshChat(body: Element, item?: Zotero.Item | null) {
     }
 
     wrapper.appendChild(bubble);
+    if (polishDiffPanel) wrapper.appendChild(polishDiffPanel);
     wrapper.appendChild(meta);
     chatBox.appendChild(wrapper);
     if (isUser && hasUserContext) {

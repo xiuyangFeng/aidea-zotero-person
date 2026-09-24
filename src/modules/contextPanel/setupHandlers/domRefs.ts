@@ -26,23 +26,29 @@ export type PanelDomRefs = {
   selectTextBtn: HTMLButtonElement | null;
   screenshotBtn: HTMLButtonElement | null;
   uploadBtn: HTMLButtonElement | null;
-  newChatBtn: HTMLButtonElement | null;
+  readingBtn: HTMLButtonElement | null;
   uploadInput: HTMLInputElement | null;
   slashMenu: HTMLDivElement | null;
   slashUploadOption: HTMLButtonElement | null;
   slashReferenceOption: HTMLButtonElement | null;
   slashLibraryOption: HTMLButtonElement | null;
   slashAnnotationsOption: HTMLButtonElement | null;
+  readingMenu: HTMLDivElement | null;
   slashAnnotationSummaryOption: HTMLButtonElement | null;
   slashPaperBriefingOption: HTMLButtonElement | null;
   slashReadingCardOption: HTMLButtonElement | null;
   slashFigureNavigatorOption: HTMLButtonElement | null;
+  readingPaperToCodeOption: HTMLButtonElement | null;
   figureMenu: HTMLDivElement | null;
   slashCitationInsightOption: HTMLButtonElement | null;
   slashConceptExtractOption: HTMLButtonElement | null;
   slashConceptRecordOption: HTMLButtonElement | null;
   slashGlossaryExportOption: HTMLButtonElement | null;
   slashWritingDraftOption: HTMLButtonElement | null;
+  readingCriticalReviewOption: HTMLButtonElement | null;
+  readingSynthesisMatrixOption: HTMLButtonElement | null;
+  readingPolishToggle: HTMLButtonElement | null;
+  readingPolishSubmenu: HTMLDivElement | null;
   contextPreviews: HTMLDivElement | null;
   imagePreview: HTMLDivElement | null;
   selectedContextList: HTMLDivElement | null;
@@ -82,6 +88,7 @@ export type PanelDomRefs = {
   chatReadinessBarMessage: HTMLDivElement | null;
   chatReadinessBarAction: HTMLButtonElement | null;
   status: HTMLElement | null;
+  notice: HTMLDivElement | null;
   chatBox: HTMLDivElement | null;
   scrollBottomBtn: HTMLButtonElement | null;
   settingScroll: HTMLDivElement | null;
@@ -158,7 +165,9 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     uploadBtn: body.querySelector(
       "#llm-upload-file",
     ) as HTMLButtonElement | null,
-    newChatBtn: body.querySelector("#llm-new-chat") as HTMLButtonElement | null,
+    readingBtn: body.querySelector(
+      "#llm-reading-actions",
+    ) as HTMLButtonElement | null,
     uploadInput: body.querySelector(
       "#llm-upload-input",
     ) as HTMLInputElement | null,
@@ -175,6 +184,9 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     slashAnnotationsOption: body.querySelector(
       "#llm-slash-annotations-option",
     ) as HTMLButtonElement | null,
+    readingMenu: body.querySelector(
+      "#llm-reading-menu",
+    ) as HTMLDivElement | null,
     slashAnnotationSummaryOption: body.querySelector(
       "#llm-slash-annotation-summary-option",
     ) as HTMLButtonElement | null,
@@ -186,6 +198,9 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     ) as HTMLButtonElement | null,
     slashFigureNavigatorOption: body.querySelector(
       "#llm-slash-figure-navigator-option",
+    ) as HTMLButtonElement | null,
+    readingPaperToCodeOption: body.querySelector(
+      "#llm-reading-paper-to-code-option",
     ) as HTMLButtonElement | null,
     figureMenu: body.querySelector("#llm-figure-menu") as HTMLDivElement | null,
     slashCitationInsightOption: body.querySelector(
@@ -203,6 +218,18 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
     slashWritingDraftOption: body.querySelector(
       "#llm-slash-writing-draft-option",
     ) as HTMLButtonElement | null,
+    readingCriticalReviewOption: body.querySelector(
+      "#llm-reading-critical-review-option",
+    ) as HTMLButtonElement | null,
+    readingSynthesisMatrixOption: body.querySelector(
+      "#llm-reading-synthesis-matrix-option",
+    ) as HTMLButtonElement | null,
+    readingPolishToggle: body.querySelector(
+      "#llm-reading-polish-toggle",
+    ) as HTMLButtonElement | null,
+    readingPolishSubmenu: body.querySelector(
+      "#llm-reading-polish-submenu",
+    ) as HTMLDivElement | null,
     contextPreviews: body.querySelector(
       "#llm-context-previews",
     ) as HTMLDivElement | null,
@@ -314,6 +341,7 @@ export function getPanelDomRefs(body: Element): PanelDomRefs {
       "#llm-chat-readiness-bar-action",
     ) as HTMLButtonElement | null,
     status: body.querySelector("#llm-status") as HTMLElement | null,
+    notice: body.querySelector("#llm-notice") as HTMLDivElement | null,
     chatBox: body.querySelector("#llm-chat-box") as HTMLDivElement | null,
     scrollBottomBtn: body.querySelector(
       "#llm-scroll-bottom",

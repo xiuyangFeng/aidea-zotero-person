@@ -43,6 +43,10 @@ declare namespace _ZoteroTypes {
       "authorProfiles.model": string;
       "authorProfiles.provider": string;
       "authorProfiles.language": string;
+      "selectionPopup.quickActions": boolean;
+      "hotkeys.focusComposer": string;
+      "hotkeys.askSelection": string;
+      "hotkeys.translateSelection": string;
       "selectionTranslate.enabled": boolean;
       "selectionTranslate.auto": boolean;
       "selectionTranslate.showCopyButton": boolean;

@@ -296,6 +296,26 @@ export function buildDiscussionComposer(params: {
   const uploadSlot = createElement(doc, "div", "llm-action-slot");
   uploadSlot.append(uploadBtn, uploadInput);
 
+  // Reading actions — everything that reads the paper for the user. Split out
+  // of the `+` menu, which now only holds ways to add context.
+  const readingBtn = createElement(
+    doc,
+    "button",
+    "llm-shortcut-btn llm-action-btn llm-action-btn-secondary llm-reading-actions-btn llm-action-icon-only",
+    {
+      id: "llm-reading-actions",
+      type: "button",
+      textContent: "",
+      title: i18n.readingActions,
+      disabled: !hasItem,
+    },
+  );
+  readingBtn.setAttribute("aria-haspopup", "menu");
+  readingBtn.setAttribute("aria-expanded", "false");
+  readingBtn.setAttribute("aria-label", i18n.readingActions);
+  const readingSlot = createElement(doc, "div", "llm-action-slot");
+  readingSlot.appendChild(readingBtn);
+
   const {
     slot: modelDropdown,
     button: modelBtn,
@@ -357,25 +377,11 @@ export function buildDiscussionComposer(params: {
   const sendSlot = createElement(doc, "div", "llm-action-slot");
   sendSlot.append(sendBtn, cancelBtn);
 
-  // New conversation button
-  const newChatBtn = createElement(
-    doc,
-    "button",
-    "llm-shortcut-btn llm-action-btn llm-action-btn-secondary llm-new-chat-btn llm-action-icon-only",
-    {
-      id: "llm-new-chat",
-      type: "button",
-      textContent: "",
-      title: i18n.newConversation,
-    },
-  );
-  const newChatSlot = createElement(doc, "div", "llm-action-slot");
-  newChatSlot.appendChild(newChatBtn);
-
-  // Order: ➕ new chat, 📎 upload/attach, ✂️ screenshot, Add Text, Model, Thinking
+  // Order: + add context, book reading actions, screenshot, Add Text,
+  // Model, Thinking. "New conversation" lives in the header (#llm-history-new).
   actionsLeft.append(
-    newChatSlot,
     uploadSlot,
+    readingSlot,
     screenshotSlot,
     selectTextSlot,
     modelDropdown,

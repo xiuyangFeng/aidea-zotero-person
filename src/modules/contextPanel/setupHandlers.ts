@@ -110,6 +110,8 @@ import {
   editLatestUserMessageAndRetry,
   findLatestRetryPair,
   switchConversationVariant,
+  renderPolishingDiff,
+  resolvePolishingOriginalText,
   type EditLatestTurnMarker,
 } from "./chat";
 import {
@@ -145,10 +147,8 @@ import {
 } from "../../utils/pageAnchors";
 import {
   READING_CARD_FOCUS_PREF_KEY,
-  READING_CARD_NOTE_TAG,
   READING_CARD_TEMPLATE_PREF_KEY,
   buildReadingCardPrompt,
-  isReadingCardText,
   resolveReadingCardPageCitations,
 } from "../../utils/readingCard";
 import {
@@ -156,9 +156,34 @@ import {
   buildPaperBriefingPrompt,
   evaluateAutoBriefingGate,
   getAutoBriefingMode,
+  isAutoBriefingRunOver,
   paperPinsBlockAutoBriefing,
+  setAutoBriefingMode,
   shouldStillAutoBrief,
 } from "../../utils/autoBriefing";
+import { dismissPanelNotice, showPanelNotice } from "./notice";
+import {
+  CITATION_IMPORT_NOTICE_SOURCE,
+  offerCitationImports,
+} from "./citationImportActions";
+import {
+  describePaperCodeFailure,
+  openGitHubUrl,
+  readPaperCodeQueryInput,
+  renderPaperCodeMenu,
+  resolveBibliographicItem,
+  searchPaperCode,
+} from "./paperToCodeActions";
+import { collectImportableReferences } from "../../utils/citationImport";
+import {
+  buildCodeRepositoryRows,
+  buildGitHubWebSearchUrl,
+} from "../../utils/paperToCode";
+import {
+  EMPTY_GUIDE_ENTRY_TARGETS,
+  isEmptyGuideEntryId,
+  type EmptyGuideEntryId,
+} from "./emptyGuide";
 import {
   isSuggestedQuestionsEnabled,
   stripSuggestedQuestions,
@@ -192,6 +217,39 @@ import {
   collectAnnotationSource,
   type AnnotationSource,
 } from "./annotationSources";
+import {
+  attachSelectionToPanel,
+  dispatchReadingAction,
+  isReadingActionKind,
+  resolveReadingPanel,
+  type ReadingActionKind,
+} from "./readingActions";
+import { isMenuFocusKey, resolveMenuFocusIndex } from "./menuKeyboard";
+import {
+  buildCriticalReviewAttachedDocumentNotice,
+  buildCriticalReviewPrompt,
+  buildCriticalReviewTitleRule,
+} from "../../utils/criticalReview";
+import {
+  SYNTHESIS_MATRIX_MIN_PAPERS,
+  buildSynthesisMatrixAttachedDocumentsNotice,
+  buildSynthesisMatrixPrompt,
+  buildSynthesisMatrixTitleRule,
+  buildSynthesisPaperInput,
+  dedupeSynthesisPaperInputs,
+  type SynthesisPaperInput,
+} from "../../utils/synthesisMatrix";
+import {
+  buildPolishingPrompt,
+  buildPolishingTitleRule,
+  splitPolishingAnswer,
+  type PolishingMode,
+} from "../../utils/academicPolishing";
+import {
+  buildHighlightDigestPrompt,
+  buildHighlightDigestTitleRule,
+  toHighlightAnnotations,
+} from "../../utils/highlightDigest";
 import {
   buildAnnotationContextBlock,
   buildModelPromptWithAnnotationContext,
@@ -229,6 +287,8 @@ import {
   createStandaloneNoteFromChatHistory,
   createStandaloneNoteFromMarkdown,
   buildChatHistoryNotePayload,
+  prepareAssistantNoteMarkdown,
+  resolveAssistantNoteTags,
 } from "./notes";
 import {
   persistAttachmentBlob,
@@ -288,6 +348,7 @@ import { pickChatInputPlaceholder } from "./placeholderTips";
 import {
   FIGURE_MENU_OPEN_CLASS,
   MODEL_MENU_OPEN_CLASS,
+  READING_MENU_OPEN_CLASS,
   REASONING_MENU_OPEN_CLASS,
   RETRY_MODEL_MENU_OPEN_CLASS,
   SLASH_MENU_OPEN_CLASS,
@@ -361,21 +422,6 @@ const SETTING_TAB_RENDER_VERSION = "2026-06-01-font-theme-layout";
  * cheapest way to let a user who cleared a conversation get a fresh briefing.
  */
 const autoBriefingAttemptedItemIds = new Set<number>();
-
-/**
- * Tag options for saving an answer as a note.
- *
- * Only reading cards are tagged, so the tag keeps meaning a card and a Zotero
- * saved search on it stays clean. Recognition is content-based — see
- * `isReadingCardText`.
- */
-function resolveAssistantNoteTags(
-  text: string,
-): { tags: string[] } | undefined {
-  return isReadingCardText(text)
-    ? { tags: [READING_CARD_NOTE_TAG] }
-    : undefined;
-}
 
 export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   // Re-bootstrap on a persistent host must dispose the document/window-level
@@ -471,23 +517,29 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     selectTextBtn,
     screenshotBtn,
     uploadBtn,
-    newChatBtn,
+    readingBtn,
     uploadInput,
     slashMenu,
     slashUploadOption,
     slashReferenceOption,
     slashLibraryOption,
     slashAnnotationsOption,
+    readingMenu,
     slashAnnotationSummaryOption,
     slashPaperBriefingOption,
     slashReadingCardOption,
     slashFigureNavigatorOption,
+    readingPaperToCodeOption,
     figureMenu,
     slashCitationInsightOption,
     slashConceptExtractOption,
     slashConceptRecordOption,
     slashGlossaryExportOption,
     slashWritingDraftOption,
+    readingCriticalReviewOption,
+    readingSynthesisMatrixOption,
+    readingPolishToggle,
+    readingPolishSubmenu,
     contextPreviews,
     imagePreview,
     selectedContextList,
@@ -527,6 +579,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     chatReadinessBarMessage,
     chatReadinessBarAction,
     status,
+    notice,
     chatBox,
     scrollBottomBtn,
     settingScroll,
@@ -858,11 +911,33 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       historyToggleBtn.setAttribute("aria-expanded", "false");
     }
   };
+  /**
+   * Reader passage captured for the reading menu's selection actions.
+   *
+   * Declared here, next to the menu helpers, because `closeReadingMenu` empties
+   * it; the capture and read helpers live with the reading menu below.
+   */
+  let pendingReadingSelection = "";
   const closeSlashMenu = () => {
     setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, false);
     if (uploadBtn) {
       uploadBtn.setAttribute("aria-expanded", "false");
     }
+  };
+  /**
+   * Close the reading menu and fold its polishing submenu back up.
+   *
+   * The submenu is collapsed on close rather than on open so a menu reopened
+   * right after a polish run does not come back already expanded.
+   */
+  const closeReadingMenu = () => {
+    setFloatingMenuOpen(readingMenu, READING_MENU_OPEN_CLASS, false);
+    if (readingPolishSubmenu) readingPolishSubmenu.hidden = true;
+    readingPolishToggle?.setAttribute("aria-expanded", "false");
+    readingBtn?.setAttribute("aria-expanded", "false");
+    // A closed menu keeps no passage: the next one is opened on whatever the
+    // reader has selected then, which may well be nothing.
+    pendingReadingSelection = "";
   };
   const closeFigureMenu = () => {
     setFloatingMenuOpen(figureMenu, FIGURE_MENU_OPEN_CLASS, false);
@@ -1204,7 +1279,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
               [
                 {
                   role: "assistant",
-                  text: contentText,
+                  text: prepareAssistantNoteMarkdown(contentText),
                   timestamp: Date.now(),
                   modelName,
                 },
@@ -1219,7 +1294,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           }
           const saveResult = await createNoteFromAssistantText(
             targetItem,
-            contentText,
+            prepareAssistantNoteMarkdown(contentText),
             modelName,
             resolveAssistantNoteTags(contentText),
           );
@@ -1522,6 +1597,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       if (exportBtn.disabled || !exportMenu || !item) return;
       closeRetryModelMenu();
       closeSlashMenu();
+      closeReadingMenu();
       closeResponseMenu();
       closePromptMenu();
       closeHistoryMenu();
@@ -4375,19 +4451,6 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     });
   }
 
-  // New chat button in the action bar (same as historyNewBtn)
-  if (newChatBtn) {
-    newChatBtn.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (tabType === "reader") {
-        void clearAndRestartPaperConversation();
-      } else {
-        void createAndSwitchGlobalConversation();
-      }
-    });
-  }
-
   if (historyUndoBtn) {
     historyUndoBtn.addEventListener("click", (e: Event) => {
       e.preventDefault();
@@ -4405,6 +4468,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         closeModelMenu();
         closeRetryModelMenu();
         closeSlashMenu();
+        closeReadingMenu();
         closeResponseMenu();
         closePromptMenu();
         closeExportMenu();
@@ -4809,6 +4873,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       reasoningVisible ? `reasoning:${reasoningLabel}` : "reasoning:hidden",
       modelCanUseTwoLineWrap ? "wrap" : "nowrap",
       uploadBtn?.disabled ? "upload-disabled" : "upload-enabled",
+      readingBtn?.disabled ? "reading-disabled" : "reading-enabled",
       selectTextBtn?.disabled ? "text-disabled" : "text-enabled",
       screenshotBtn?.disabled ? "shot-disabled" : "shot-enabled",
       sendBtn?.disabled ? "send-disabled" : "send-enabled",
@@ -5002,16 +5067,10 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       return Math.max(sendWidth, 78);
     };
 
-    const newChatSlotEl = newChatBtn?.parentElement as HTMLElement | null;
+    const readingSlotEl = readingBtn?.parentElement as HTMLElement | null;
 
     const getRequiredWidth = (state: ActionRevealState) => {
       const leftSlotWidths = [
-        newChatBtn
-          ? getRenderedWidthPx(
-              newChatSlotEl || newChatBtn,
-              ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
-            )
-          : 0,
         uploadBtn
           ? getRenderedWidthPx(
               uploadSlot || uploadBtn,
@@ -5019,6 +5078,13 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
                 uploadBtn.scrollWidth || 0,
                 ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
               ),
+            )
+          : 0,
+        // The reading button is always icon-only, like the screenshot one.
+        readingBtn
+          ? getRenderedWidthPx(
+              readingSlotEl || readingBtn,
+              ACTION_LAYOUT_CONTEXT_ICON_WIDTH_PX,
             )
           : 0,
         // Screenshot is always icon-only
@@ -6998,7 +7064,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           if (status) {
             setStatus(
               status,
-              "Paper mode only accepts text from this paper",
+              getPanelI18n().paperModeForeignSelection,
               "error",
             );
           }
@@ -7160,6 +7226,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       closePromptMenu();
       closeExportMenu();
       closeFigureMenu();
+      closeReadingMenu();
       positionFloatingMenu(body, slashMenu, uploadBtn);
       setFloatingMenuOpen(slashMenu, SLASH_MENU_OPEN_CLASS, true);
       uploadBtn.setAttribute("aria-expanded", "true");
@@ -7325,13 +7392,35 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   /**
    * Built-in "summarize my annotations" action.
    *
-   * It pins the annotations, then drives the normal send path with a prompt
-   * loaded from the shortcut files. The prompt file is deliberately not
-   * registered as a shortcut button, so this action costs no editable slot.
+   * It pins the annotations — so the raw highlights still travel with the
+   * request as context — and then drives the normal send path with the
+   * highlight-digest prompt built from the very same records. The old
+   * shortcut template stays as a fallback for the case where the pinned
+   * records carry neither a passage nor a comment; the prompt file is
+   * deliberately not registered as a shortcut button, so neither path costs
+   * an editable slot.
    */
   const summarizeAnnotations = async () => {
     if (!item) return;
     if (!addAnnotationContext()) return;
+    const pinned = selectedAnnotationContextCache.get(item.id);
+    const annotations = toHighlightAnnotations(pinned?.records || []);
+    if (annotations.length) {
+      const lang = getPanelLang();
+      const prompt = [
+        buildHighlightDigestPrompt({
+          paperTitle:
+            pinned?.title?.trim() ||
+            (lang.startsWith("zh") ? "本文" : "this paper"),
+          annotations,
+          lang,
+        }),
+        buildHighlightDigestTitleRule(lang),
+      ].join("\n\n");
+      inputBox.value = prompt;
+      sendBtn.click();
+      return;
+    }
     let prompt = "";
     try {
       prompt = (
@@ -7358,7 +7447,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashAnnotationSummaryOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void summarizeAnnotations();
     });
   }
@@ -7468,7 +7557,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashReadingCardOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void generateReadingCard();
     });
   }
@@ -7592,6 +7681,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     const doc = body.ownerDocument as Document;
     const labels = getPanelI18n();
     figureMenu.innerHTML = "";
+    delete figureMenu.dataset.mode;
 
     const header = createElement(doc, "div", "llm-figure-menu-header");
     header.append(
@@ -7679,7 +7769,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
    * instead of opening an empty list.
    */
   const openFigureNavigator = async () => {
-    if (!item || !figureMenu || !uploadBtn) return;
+    if (!item || !figureMenu || !readingBtn) return;
     const labels = getPanelI18n();
     const resolved = resolveReadingCardDocument();
     if (!resolved) {
@@ -7709,7 +7799,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     // change what the next ordinary question sends.
     figureNavigatorPinItem = resolved.pinItem;
     renderFigureMenu(entries);
-    positionFloatingMenu(body, figureMenu, uploadBtn);
+    positionFloatingMenu(body, figureMenu, readingBtn);
     setFloatingMenuOpen(figureMenu, FIGURE_MENU_OPEN_CLASS, true);
     if (status) {
       setStatus(status, labels.figureNavigatorCount(entries.length), "ready");
@@ -7720,7 +7810,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashFigureNavigatorOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void openFigureNavigator();
     });
   }
@@ -7728,6 +7818,14 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   if (figureMenu) {
     figureMenu.addEventListener("click", (e: Event) => {
       const target = e.target as HTMLElement | null;
+      // The same list also shows paper-to-code results; those rows open links.
+      const repoEl = target?.closest?.("[data-repo-url]") as HTMLElement | null;
+      if (repoEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        openGitHubUrl(repoEl.dataset.repoUrl || "");
+        return;
+      }
       const actionEl = target?.closest?.(
         "[data-figure-index]",
       ) as HTMLElement | null;
@@ -7744,6 +7842,108 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         return;
       }
       openFigureEntryPage(entry);
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Paper to code — GitHub repositories that mention the paper
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * The paper whose code to look for: the panel's own paper, else the first
+   * library selection that has metadata. Unlike the reading card no readable
+   * file is needed — only the title, DOI or arXiv id.
+   */
+  const resolvePaperForCodeSearch = (): Zotero.Item | null => {
+    const panelItem = item && !isGlobalPortalItem(item) ? item : null;
+    const candidates: Array<Zotero.Item | null> = [panelItem];
+    const resolved = resolveReadingCardDocument();
+    if (resolved) {
+      candidates.push(resolved.pinItem, resolved.document.item);
+    }
+    const win = body.ownerDocument?.defaultView;
+    for (const selectedId of getLibrarySelectedItemIdsFromWindow(win)) {
+      candidates.push(getZoteroItem(selectedId));
+    }
+    for (const candidate of candidates) {
+      const paper = resolveBibliographicItem(candidate);
+      if (paper) return paper;
+    }
+    return null;
+  };
+
+  /**
+   * Built-in "find code repositories" action.
+   *
+   * The result opens in the floating list the figure navigator uses, anchored
+   * to the reading button; failures go to the notice, a rate limit with the
+   * wait GitHub announces. No model call is involved.
+   */
+  const openPaperToCode = async () => {
+    if (!item || !figureMenu || !readingBtn) return;
+    const labels = getPanelI18n();
+    const paper = resolvePaperForCodeSearch();
+    if (!paper) {
+      if (status) setStatus(status, labels.paperToCodeNoPaper, "warning");
+      return;
+    }
+    const input = readPaperCodeQueryInput(paper);
+    if (status) setStatus(status, labels.paperToCodeSearching, "sending");
+    const outcome = await searchPaperCode(input);
+    if (outcome.kind === "no-query") {
+      if (status) setStatus(status, labels.paperToCodeNoQuery, "warning");
+      return;
+    }
+    if (outcome.kind === "failed") {
+      if (status) setStatus(status, labels.statusReady, "ready");
+      showPanelNotice(notice, {
+        kind: outcome.failure === "rate-limited" ? "warning" : "error",
+        message: describePaperCodeFailure(outcome),
+        source: "paper-to-code",
+        actions:
+          outcome.failure === "rate-limited"
+            ? []
+            : [
+                {
+                  label: labels.lookupRetry,
+                  primary: true,
+                  onClick: () => void openPaperToCode(),
+                },
+              ],
+      });
+      return;
+    }
+    const rows = buildCodeRepositoryRows(outcome.repositories);
+    if (!rows.length) {
+      if (status) setStatus(status, labels.statusReady, "ready");
+      showPanelNotice(notice, {
+        kind: "info",
+        message: labels.paperToCodeEmpty,
+        source: "paper-to-code",
+        actions: [
+          {
+            label: labels.paperToCodeSearchWeb,
+            onClick: () =>
+              void openGitHubUrl(buildGitHubWebSearchUrl(input.title)),
+          },
+        ],
+      });
+      return;
+    }
+    renderPaperCodeMenu(figureMenu, rows);
+    positionFloatingMenu(body, figureMenu, readingBtn);
+    setFloatingMenuOpen(figureMenu, FIGURE_MENU_OPEN_CLASS, true);
+    if (status) {
+      setStatus(status, labels.paperToCodeCount(rows.length), "ready");
+    }
+  };
+
+  if (readingPaperToCodeOption) {
+    readingPaperToCodeOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeReadingMenu();
+      void openPaperToCode();
     });
   }
 
@@ -7920,13 +8120,39 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         "ready",
       );
     }
+    // Works the library does not have are offered for import in the notice,
+    // where the offer stays while the answer streams and needs no scrolling.
+    offerMissingCitationImports(resolutions);
+  };
+
+  const offerMissingCitationImports = (resolutions: CitationResolution[]) => {
+    const libraryID = resolveConceptLibraryID(item);
+    if (!libraryID || !notice) return;
+    const references = collectImportableReferences(resolutions);
+    if (!references.length) {
+      dismissPanelNotice(notice, { source: CITATION_IMPORT_NOTICE_SOURCE });
+      return;
+    }
+    offerCitationImports(
+      {
+        anchor: notice,
+        libraryID,
+        attachAsContext: (imported) => {
+          const paperRef = resolvePaperContextRefFromLibraryItem(imported);
+          return paperRef
+            ? upsertPaperContext(paperRef, { silent: true })
+            : false;
+        },
+      },
+      references,
+    );
   };
 
   if (slashCitationInsightOption) {
     slashCitationInsightOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void explainSelectedCitations();
     });
   }
@@ -7946,7 +8172,13 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
    * one watching it, so every failure is logged and dropped rather than turned
    * into a status message the user never asked to see.
    */
-  const generatePaperBriefing = async (options?: { auto?: boolean }) => {
+  const generatePaperBriefing = async (options?: {
+    auto?: boolean;
+    /** Checked after the async template load, right before sending. */
+    isCanceled?: () => boolean;
+    /** Called once the prompt has been handed to the send flow. */
+    onSent?: () => void;
+  }) => {
     if (!item) return;
     const auto = options?.auto === true;
     const labels = getPanelI18n();
@@ -7993,15 +8225,19 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       reportFailure(labels.paperBriefingPromptFailed, "error");
       return;
     }
+    // The user may have pressed Cancel on the notice while the template
+    // loaded; nothing has been sent yet, so simply stop here.
+    if (auto && options?.isCanceled?.()) return;
     inputBox.value = prompt;
     sendBtn.click();
+    options?.onSent?.();
   };
 
   if (slashPaperBriefingOption) {
     slashPaperBriefingOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void generatePaperBriefing();
     });
   }
@@ -8047,6 +8283,107 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     return false;
   };
 
+  // ── Auto briefing: the notice that lets the user call it off ──
+  //
+  // An automatic briefing spends a request the user never asked for, so from
+  // the moment it is scheduled until its answer finishes, a notice says so and
+  // offers Cancel (this one) and "Don't auto-generate" (this and all future
+  // ones). The run moves through three phases: `pending` (timer counting
+  // down), `preparing` (template loading, nothing sent) and `streaming`.
+
+  type AutoBriefingRun = {
+    phase: "pending" | "preparing" | "streaming";
+    timer: number | null;
+    watcher: number | null;
+    canceled: boolean;
+  };
+  const AUTO_BRIEFING_NOTICE_SOURCE = "auto-briefing";
+  const AUTO_BRIEFING_WATCH_INTERVAL_MS = 600;
+  let autoBriefingRun: AutoBriefingRun | null = null;
+
+  const endAutoBriefingRun = (run: AutoBriefingRun) => {
+    clearWindowTimeout(run.timer);
+    clearWindowTimeout(run.watcher);
+    run.timer = null;
+    run.watcher = null;
+    if (autoBriefingRun !== run) return;
+    autoBriefingRun = null;
+    dismissPanelNotice(notice, { source: AUTO_BRIEFING_NOTICE_SOURCE });
+  };
+
+  const cancelAutoBriefing = (disableAuto: boolean) => {
+    const run = autoBriefingRun;
+    if (!run) return;
+    const labels = getPanelI18n();
+    run.canceled = true;
+    const wasStreaming = run.phase === "streaming";
+    endAutoBriefingRun(run);
+    // A briefing already streaming is stopped exactly as the composer's own
+    // stop button would stop it.
+    if (wasStreaming && isPanelGenerating(body)) {
+      cancelBtn?.click();
+    } else if (run.phase === "preparing" && status) {
+      // The template load already announced the briefing on the status line.
+      setStatus(status, labels.statusReady, "ready");
+    }
+    if (disableAuto) setAutoBriefingMode("manual");
+    showPanelNotice(notice, {
+      kind: "info",
+      message: disableAuto
+        ? labels.autoBriefingNoticeDisabled
+        : labels.autoBriefingNoticeCanceled,
+      source: AUTO_BRIEFING_NOTICE_SOURCE,
+    });
+  };
+
+  const showAutoBriefingNotice = () => {
+    const labels = getPanelI18n();
+    showPanelNotice(notice, {
+      kind: "info",
+      message: labels.autoBriefingNoticeScheduled,
+      persist: true,
+      source: AUTO_BRIEFING_NOTICE_SOURCE,
+      actions: [
+        {
+          label: labels.autoBriefingNoticeCancel,
+          primary: true,
+          onClick: () => cancelAutoBriefing(false),
+        },
+        {
+          label: labels.autoBriefingNoticeDisable,
+          onClick: () => cancelAutoBriefing(true),
+        },
+      ],
+    });
+  };
+
+  /** Keep the notice up while the sent briefing runs, then take it down. */
+  const watchAutoBriefingRun = (run: AutoBriefingRun) => {
+    if (run.canceled || autoBriefingRun !== run) return;
+    run.phase = "streaming";
+    const startedAt = Date.now();
+    let sawGenerating = false;
+    const tick = () => {
+      run.watcher = null;
+      if (run.canceled || autoBriefingRun !== run) return;
+      const generating = isPanelGenerating(body);
+      if (generating) sawGenerating = true;
+      if (
+        isAutoBriefingRunOver({
+          panelConnected: body.isConnected,
+          generating,
+          sawGenerating,
+          elapsedMs: Date.now() - startedAt,
+        })
+      ) {
+        endAutoBriefingRun(run);
+        return;
+      }
+      run.watcher = getWindowTimeout(tick, AUTO_BRIEFING_WATCH_INTERVAL_MS);
+    };
+    tick();
+  };
+
   /**
    * Schedule the opening briefing, if this panel is the one that should write it.
    *
@@ -8083,7 +8420,17 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     // Claimed at schedule time, not at send time: a rebuilt panel must not
     // queue a second timer while this one is still counting down.
     autoBriefingAttemptedItemIds.add(panelItem.id);
-    getWindowTimeout(() => {
+    const run: AutoBriefingRun = {
+      phase: "pending",
+      timer: null,
+      watcher: null,
+      canceled: false,
+    };
+    autoBriefingRun = run;
+    showAutoBriefingNotice();
+    run.timer = getWindowTimeout(() => {
+      run.timer = null;
+      if (run.canceled) return;
       let activeDocumentItemId: number | null = null;
       try {
         activeDocumentItemId =
@@ -8102,9 +8449,19 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       });
       if (!stillWanted) {
         ztoolkit.log("LLM: auto briefing dropped before sending");
+        endAutoBriefingRun(run);
         return;
       }
-      void generatePaperBriefing({ auto: true });
+      run.phase = "preparing";
+      void generatePaperBriefing({
+        auto: true,
+        isCanceled: () => run.canceled,
+        onSent: () => watchAutoBriefingRun(run),
+      }).finally(() => {
+        // Anything that returned without sending (no document, no prompt)
+        // leaves nothing to cancel.
+        if (run.phase === "preparing") endAutoBriefingRun(run);
+      });
     }, AUTO_BRIEFING_TRIGGER_DELAY_MS);
   };
 
@@ -8364,7 +8721,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashConceptExtractOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void extractConceptCards();
     });
   }
@@ -8373,7 +8730,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashConceptRecordOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       recordConceptCard();
     });
   }
@@ -8382,7 +8739,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashGlossaryExportOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void exportGlossary();
     });
   }
@@ -8466,14 +8823,584 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     slashWritingDraftOption.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      closeSlashMenu();
+      closeReadingMenu();
       void exportWritingDraft();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Reading menu — everything that reads the paper for the user
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Height cap for the reading menu, matching the CSS rule.
+   *
+   * `positionFloatingMenu` writes an inline `max-height` derived from the space
+   * around the anchor, and an inline style beats the stylesheet — so the cap
+   * has to be re-applied after positioning rather than left to CSS alone.
+   */
+  const READING_MENU_MAX_HEIGHT_PX = 560;
+
+  const positionReadingMenu = () => {
+    if (!readingMenu || !readingBtn) return;
+    positionFloatingMenu(body, readingMenu, readingBtn);
+    const win = body.ownerDocument?.defaultView;
+    if (!win) return;
+    const cap = Math.max(
+      160,
+      Math.min(READING_MENU_MAX_HEIGHT_PX, Math.round(win.innerHeight * 0.6)),
+    );
+    const inlineMax = Number.parseFloat(readingMenu.style.maxHeight);
+    const nextMax = Math.min(Number.isFinite(inlineMax) ? inlineMax : cap, cap);
+    const beforeRect = readingMenu.getBoundingClientRect();
+    readingMenu.style.maxHeight = `${Math.round(nextMax)}px`;
+    const afterRect = readingMenu.getBoundingClientRect();
+    // A menu that opened upward is anchored by its bottom edge, so shrinking
+    // it must move the top down or it drifts away from the button.
+    const anchorRect = readingBtn.getBoundingClientRect();
+    if (
+      beforeRect.top < anchorRect.top &&
+      afterRect.height < beforeRect.height
+    ) {
+      readingMenu.style.top = `${Math.round(beforeRect.bottom - afterRect.height)}px`;
+    }
+  };
+
+  const openReadingMenu = () => {
+    if (!readingMenu || !readingBtn) return;
+    closeRetryModelMenu();
+    closeModelMenu();
+    closeReasoningMenu();
+    closeHistoryMenu();
+    closeResponseMenu();
+    closePromptMenu();
+    closeExportMenu();
+    closeFigureMenu();
+    closeSlashMenu();
+    if (readingPolishSubmenu) readingPolishSubmenu.hidden = true;
+    readingPolishToggle?.setAttribute("aria-expanded", "false");
+    positionReadingMenu();
+    setFloatingMenuOpen(readingMenu, READING_MENU_OPEN_CLASS, true);
+    readingBtn.setAttribute("aria-expanded", "true");
+  };
+
+  /**
+   * Remember the reader's selection before the panel steals its focus.
+   *
+   * Pressing anything in the panel moves focus out of the reader, which drops
+   * the reader's own selection — so the passage is read on the pointer events
+   * that precede that focus shift, and only a non-empty read is stored, since
+   * the later events of the same press already see the cleared selection.
+   * The cache is emptied whenever the menu closes (`closeReadingMenu`), so a
+   * passage can never be reused by a menu opened with nothing selected.
+   */
+  const captureReadingSelection = () => {
+    if (!item) return;
+    const selectedText = getActiveReaderSelectionText(
+      body.ownerDocument as Document,
+      item,
+    );
+    if (selectedText) pendingReadingSelection = selectedText;
+  };
+  /** A live selection wins; the cached one covers the focus that was lost. */
+  const takeReadingSelection = (): string => {
+    const live = item
+      ? getActiveReaderSelectionText(body.ownerDocument as Document, item)
+      : "";
+    return (live || pendingReadingSelection || "").trim();
+  };
+  const watchReadingSelectionOn = (target: HTMLElement | null) => {
+    if (!target) return;
+    for (const type of ["pointerdown", "mousedown", "touchstart"]) {
+      target.addEventListener(type, captureReadingSelection, true);
+    }
+  };
+  watchReadingSelectionOn(readingBtn);
+  watchReadingSelectionOn(readingMenu);
+
+  if (readingBtn) {
+    readingBtn.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item || !readingMenu) return;
+      if (isFloatingMenuOpen(readingMenu)) {
+        closeReadingMenu();
+      } else {
+        openReadingMenu();
+      }
+    });
+  }
+
+  // ── Keyboard: Up/Down move between rows, Enter activates, Esc closes ──
+  const getReadingMenuRows = (): HTMLButtonElement[] => {
+    if (!readingMenu) return [];
+    return (
+      Array.from(
+        readingMenu.querySelectorAll("button.llm-response-menu-item"),
+      ) as HTMLButtonElement[]
+    ).filter((row) => !row.disabled && row.offsetParent !== null);
+  };
+
+  if (readingMenu) {
+    readingMenu.addEventListener("keydown", (e: Event) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Escape") {
+        ke.preventDefault();
+        ke.stopPropagation();
+        closeReadingMenu();
+        readingBtn?.focus({ preventScroll: true });
+        return;
+      }
+      if (!isMenuFocusKey(ke.key)) return;
+      const rows = getReadingMenuRows();
+      if (!rows.length) return;
+      ke.preventDefault();
+      ke.stopPropagation();
+      const active = body.ownerDocument?.activeElement as HTMLElement | null;
+      const nextIndex = resolveMenuFocusIndex(
+        rows.length,
+        active ? rows.indexOf(active as HTMLButtonElement) : -1,
+        ke.key,
+      );
+      rows[nextIndex]?.focus({ preventScroll: true });
+    });
+  }
+
+  if (readingBtn) {
+    readingBtn.addEventListener("keydown", (e: Event) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key !== "ArrowDown" && ke.key !== "ArrowUp") return;
+      if (!item || !readingMenu) return;
+      ke.preventDefault();
+      ke.stopPropagation();
+      if (!isFloatingMenuOpen(readingMenu)) openReadingMenu();
+      const rows = getReadingMenuRows();
+      if (!rows.length) return;
+      rows[resolveMenuFocusIndex(rows.length, -1, ke.key)]?.focus({
+        preventScroll: true,
+      });
+    });
+  }
+
+  // ── Section 2: the six actions that work on the current selection ──
+
+  /**
+   * The reader attachment a selection action should be attributed to.
+   *
+   * Only an attachment is passed on: `dispatchReadingAction` compares the
+   * panel's paper against the reader's, and a library panel holding a regular
+   * item (or a global portal placeholder) would fail that comparison and
+   * refuse a passage the user explicitly asked about.
+   */
+  const resolveReadingActionItem = (): Zotero.Item | null =>
+    item && !isGlobalPortalItem(item) && item.isAttachment?.()
+      ? (item as Zotero.Item)
+      : null;
+
+  const runSelectionReadingAction = (
+    kind: ReadingActionKind,
+    selectedText: string,
+  ) => {
+    const labels = getPanelI18n();
+    if (!selectedText) {
+      if (status) setStatus(status, labels.readingActionNoSelection, "warning");
+      return;
+    }
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    if (status) setStatus(status, labels.readingActionSending, "sending");
+    void (async () => {
+      try {
+        // The dispatcher reports "generating", "not ready" and paper
+        // mismatches on the status line itself, so only the outcomes it stays
+        // silent about are turned into a message here.
+        const result = await dispatchReadingAction({
+          kind,
+          selectedText,
+          readerItem: resolveReadingActionItem(),
+          doc: body.ownerDocument as Document,
+          reveal: false,
+        });
+        if (!status) return;
+        if (result.outcome === "no-selection") {
+          setStatus(status, labels.readingActionNoSelection, "warning");
+        } else if (
+          result.outcome === "no-panel" ||
+          result.outcome === "no-prompt" ||
+          result.outcome === "failed"
+        ) {
+          setStatus(status, labels.readingActionPanelUnavailable, "warning");
+        }
+      } catch (err) {
+        ztoolkit.log("LLM: reading action failed", err);
+        if (status) {
+          setStatus(status, labels.readingActionPanelUnavailable, "error");
+        }
+      }
+    })();
+  };
+
+  if (readingMenu) {
+    readingMenu.addEventListener("click", (e: Event) => {
+      const target = (e.target as Element | null)?.closest(
+        "[data-reading-kind]",
+      ) as HTMLButtonElement | null;
+      if (!target) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const kind = target.dataset.readingKind || "";
+      if (!isReadingActionKind(kind)) return;
+      // Read before closing: closing empties the captured passage.
+      const selectedText = takeReadingSelection();
+      closeReadingMenu();
+      runSelectionReadingAction(kind, selectedText);
+    });
+  }
+
+  // ── Section 3: whole-document actions ──
+
+  /** Title of the paper a resolved document belongs to. */
+  const resolveDocumentPaperTitle = (document: ReaderDocument): string => {
+    try {
+      const attachment = document.item;
+      const parentId = attachment.parentID;
+      const parent =
+        typeof parentId === "number" && parentId > 0
+          ? getZoteroItem(parentId)
+          : null;
+      return String(
+        (parent?.getField?.("title") as string | undefined) ||
+          (attachment.getField?.("title") as string | undefined) ||
+          "",
+      ).trim();
+    } catch {
+      return "";
+    }
+  };
+
+  /**
+   * Built-in "critical review of the whole document" action.
+   *
+   * The paper is already the conversation's document context, so the prompt
+   * carries a placeholder where the builder expects the text: pasting the
+   * whole paper into the question as well would double the request without
+   * telling the model anything new.
+   */
+  const generateCriticalReview = async () => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const resolved = resolveReadingCardDocument();
+    if (!resolved) {
+      if (status) setStatus(status, labels.criticalReviewNoDocument, "warning");
+      return;
+    }
+    if (resolved.pinItem) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(resolved.pinItem);
+      if (paperRef) upsertPaperContext(paperRef, { silent: true });
+    }
+    const lang = getPanelLang();
+    const paperTitle =
+      resolveDocumentPaperTitle(resolved.document) ||
+      (lang.startsWith("zh") ? "本文" : "this paper");
+    const prompt = [
+      buildCriticalReviewPrompt({
+        paperTitle,
+        paperContent: buildCriticalReviewAttachedDocumentNotice(lang),
+        lang,
+      }),
+      buildCriticalReviewTitleRule(lang),
+    ].join("\n\n");
+    if (status) setStatus(status, labels.criticalReviewSending, "sending");
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  if (readingCriticalReviewOption) {
+    readingCriticalReviewOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeReadingMenu();
+      void generateCriticalReview();
+    });
+  }
+
+  /** Creator display names of one item, in Zotero's own order. */
+  const readCreatorNames = (candidate: Zotero.Item): string[] => {
+    try {
+      const creators =
+        ((candidate as any).getCreators?.() as
+          Array<{ lastName?: string; name?: string }> | undefined) || [];
+      return creators
+        .map((creator) =>
+          String(creator?.lastName || creator?.name || "").trim(),
+        )
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+
+  /**
+   * A short excerpt of one document, only when it costs nothing.
+   *
+   * Extraction is never started for the matrix: the pinned papers' text
+   * reaches the model through the ordinary supplemental-context path anyway,
+   * so the excerpt is a bonus that helps the model align columns, not a
+   * reason to keep the user waiting.
+   */
+  const readCachedTextSample = (attachmentId: number): string => {
+    const cached = pdfTextCache.get(attachmentId);
+    if (!cached?.chunks?.length) return "";
+    return cached.chunks.slice(0, 2).join("\n\n");
+  };
+
+  const buildSynthesisInputFromItem = (
+    metadataItem: Zotero.Item | null,
+    fallbackTitle: string,
+    sampleAttachmentId: number,
+  ): SynthesisPaperInput | null => {
+    if (!metadataItem) {
+      return fallbackTitle.trim()
+        ? buildSynthesisPaperInput({
+            id: sampleAttachmentId || undefined,
+            title: fallbackTitle,
+            keyTextSample: readCachedTextSample(sampleAttachmentId),
+          })
+        : null;
+    }
+    let title = "";
+    let date = "";
+    let abstract = "";
+    try {
+      title = String(metadataItem.getField?.("title") || "");
+      date = String(metadataItem.getField?.("date") || "");
+      abstract = String(metadataItem.getField?.("abstractNote") || "");
+    } catch (err) {
+      ztoolkit.log("LLM: synthesis matrix metadata read failed", err);
+    }
+    return buildSynthesisPaperInput({
+      id: metadataItem.id,
+      title: title || fallbackTitle,
+      creators: readCreatorNames(metadataItem),
+      date,
+      abstract,
+      keyTextSample: readCachedTextSample(sampleAttachmentId),
+    });
+  };
+
+  /**
+   * Papers the comparison matrix should cover.
+   *
+   * The panel's own document comes first — it is the paper the user is looking
+   * at — followed by everything pinned as paper context. The two overlap
+   * constantly (a paper pinned in the library panel and then opened), which is
+   * what `dedupeSynthesisPaperInputs` is for.
+   */
+  const collectSynthesisPapers = (): {
+    papers: SynthesisPaperInput[];
+    pinItem: Zotero.Item | null;
+  } => {
+    const collected: SynthesisPaperInput[] = [];
+    let pinItem: Zotero.Item | null = null;
+    const resolved = resolveReadingCardDocument();
+    if (resolved) {
+      pinItem = resolved.pinItem;
+      const attachment = resolved.document.item;
+      const parentId = attachment.parentID;
+      const owner =
+        typeof parentId === "number" && parentId > 0
+          ? getZoteroItem(parentId)
+          : attachment.isRegularItem?.()
+            ? attachment
+            : null;
+      const input = buildSynthesisInputFromItem(
+        owner,
+        resolveDocumentPaperTitle(resolved.document),
+        attachment.id,
+      );
+      if (input) collected.push(input);
+    }
+    if (item) {
+      const pinned = normalizePaperContextEntries(
+        selectedPaperContextCache.get(item.id) || [],
+      );
+      for (const ref of pinned) {
+        const owner = getZoteroItem(ref.itemId);
+        const input = buildSynthesisInputFromItem(
+          owner,
+          ref.title,
+          ref.contextItemId,
+        );
+        if (input) collected.push(input);
+      }
+    }
+    return { papers: dedupeSynthesisPaperInputs(collected), pinItem };
+  };
+
+  /** Built-in "build a comparison matrix" action. */
+  const generateSynthesisMatrix = () => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const { papers, pinItem } = collectSynthesisPapers();
+    if (papers.length < SYNTHESIS_MATRIX_MIN_PAPERS) {
+      if (status) {
+        setStatus(status, labels.synthesisMatrixNeedsTwoPapers, "warning");
+      }
+      return;
+    }
+    // The panel's own document only travels with the request once it is
+    // pinned, which a library panel has not done yet.
+    if (pinItem) {
+      const paperRef = resolvePaperContextRefFromLibraryItem(pinItem);
+      if (paperRef) upsertPaperContext(paperRef, { silent: true });
+    }
+    const lang = getPanelLang();
+    const prompt = [
+      buildSynthesisMatrixPrompt({ papers, lang }),
+      buildSynthesisMatrixAttachedDocumentsNotice(lang),
+      buildSynthesisMatrixTitleRule(lang),
+    ].join("\n\n");
+    if (status) {
+      setStatus(
+        status,
+        labels.synthesisMatrixSending(papers.length),
+        "sending",
+      );
+    }
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  if (readingSynthesisMatrixOption) {
+    readingSynthesisMatrixOption.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeReadingMenu();
+      generateSynthesisMatrix();
+    });
+  }
+
+  // ── Academic polishing ──
+
+  if (readingPolishToggle && readingPolishSubmenu) {
+    readingPolishToggle.addEventListener("click", (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const expanded = readingPolishSubmenu.hidden;
+      readingPolishSubmenu.hidden = !expanded;
+      readingPolishToggle.setAttribute(
+        "aria-expanded",
+        expanded ? "true" : "false",
+      );
+      // The menu just changed height; re-anchor it so a menu that opened
+      // upward does not grow off the bottom of the panel.
+      positionReadingMenu();
+    });
+  }
+
+  /**
+   * Pin the text a polishing request is about, so it survives with the turn.
+   *
+   * The shared bridge is preferred because it is the same path the reader's
+   * selection popup uses, and it is what keeps a passage attributed to the
+   * right paper in a global conversation. It refuses text in a paper-mode
+   * panel that cannot be attributed to this paper, which is exactly the case
+   * of a paragraph typed into the composer — hence the local fallback.
+   */
+  const attachPolishingSource = async (text: string): Promise<void> => {
+    try {
+      const panel = await resolveReadingPanel({
+        doc: body.ownerDocument as Document,
+        item: resolveReadingActionItem(),
+      });
+      if (
+        panel &&
+        !panel.paperMismatch &&
+        attachSelectionToPanel(panel, text, {
+          focusInput: false,
+          silent: true,
+        })
+      ) {
+        return;
+      }
+    } catch (err) {
+      ztoolkit.log("LLM: polishing source attach via bridge failed", err);
+    }
+    const textContextKey = getTextContextConversationKey();
+    if (!textContextKey) return;
+    // No status text: the polishing run reports its own progress line.
+    addSelectedTextContext(body, textContextKey, text, {
+      focusInput: false,
+      source: "pdf",
+    });
+  };
+
+  /**
+   * Built-in "academic polishing" action, one run per editing mode.
+   *
+   * The reader's selection is what the user most likely means; a composer full
+   * of a pasted paragraph is the other way in, for text that is not in any
+   * document yet (a rebuttal draft, an abstract being written).
+   */
+  const runAcademicPolishing = async (
+    mode: PolishingMode,
+    selectionText: string,
+  ) => {
+    if (!item) return;
+    const labels = getPanelI18n();
+    if (isPanelGenerating(body)) {
+      if (status) setStatus(status, labels.waitForCurrentResponse, "ready");
+      return;
+    }
+    const sourceText = selectionText || inputBox.value.trim();
+    if (!sourceText) {
+      if (status) setStatus(status, labels.polishingNoSource, "warning");
+      return;
+    }
+    const lang = getPanelLang();
+    const prompt = [
+      buildPolishingPrompt({ text: sourceText, mode, lang }),
+      buildPolishingTitleRule(lang),
+    ].join("\n\n");
+    if (status) setStatus(status, labels.polishingSending, "sending");
+    // Pinned before the composer is overwritten: the diff toggle reads the
+    // original back off the user message this send is about to write.
+    await attachPolishingSource(sourceText);
+    inputBox.value = prompt;
+    sendBtn.click();
+  };
+
+  if (readingPolishSubmenu) {
+    readingPolishSubmenu.addEventListener("click", (e: Event) => {
+      const target = (e.target as Element | null)?.closest(
+        "[data-polish-mode]",
+      ) as HTMLButtonElement | null;
+      if (!target) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const mode = target.dataset.polishMode as PolishingMode | undefined;
+      if (!mode) return;
+      // Read before closing: closing empties the captured passage.
+      const selectionText = takeReadingSelection();
+      closeReadingMenu();
+      void runAcademicPolishing(mode, selectionText);
     });
   }
 
   const openModelMenu = () => {
     if (!modelMenu || !modelBtn) return;
     closeSlashMenu();
+    closeReadingMenu();
     closeRetryModelMenu();
     closePromptMenu();
     closeHistoryMenu();
@@ -8501,6 +9428,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const openReasoningMenu = () => {
     if (!reasoningMenu || !reasoningBtn) return;
     closeSlashMenu();
+    closeReadingMenu();
     closeRetryModelMenu();
     closePromptMenu();
     closeHistoryMenu();
@@ -8519,6 +9447,7 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
   const openRetryModelMenu = (anchor: HTMLButtonElement) => {
     if (!item || !retryModelMenu) return;
     closeSlashMenu();
+    closeReadingMenu();
     closeResponseMenu();
     closeExportMenu();
     closePromptMenu();
@@ -8568,6 +9497,15 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       e.stopPropagation();
     });
     slashMenu.addEventListener("mousedown", (e: Event) => {
+      e.stopPropagation();
+    });
+  }
+
+  if (readingMenu) {
+    readingMenu.addEventListener("pointerdown", (e: Event) => {
+      e.stopPropagation();
+    });
+    readingMenu.addEventListener("mousedown", (e: Event) => {
       e.stopPropagation();
     });
   }
@@ -8835,6 +9773,22 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
     sendBtn.click();
   };
 
+  /**
+   * Run an entry of the empty-conversation guide by pressing the menu row it
+   * stands for, so the guide never has an implementation of its own.
+   */
+  const runEmptyGuideAction = (action: EmptyGuideEntryId) => {
+    if (action === "reading-menu") {
+      openReadingMenu();
+      return;
+    }
+    const target = body.querySelector(
+      EMPTY_GUIDE_ENTRY_TARGETS[action],
+    ) as HTMLButtonElement | null;
+    if (!target || target.disabled) return;
+    target.click();
+  };
+
   if (chatBox) {
     chatBox.addEventListener("keydown", (e: Event) => {
       const key = (e as KeyboardEvent).key;
@@ -8847,7 +9801,32 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       e.stopPropagation();
       openPageAnchorTarget(anchorTarget);
     });
+    // "Explain my selection" in the empty-conversation guide reads the
+    // reader's selection, which pressing the button would otherwise drop —
+    // the same capture the Reading menu does on its own rows.
+    chatBox.addEventListener(
+      "pointerdown",
+      (e: Event) => {
+        const entry = (e.target as Element | null)?.closest(
+          '[data-guide-action="ask-selection"]',
+        );
+        if (entry) captureReadingSelection();
+      },
+      true,
+    );
     chatBox.addEventListener("click", (e: Event) => {
+      // Starting points offered by the empty-conversation guide
+      const guideTarget = (e.target as Element | null)?.closest(
+        "[data-guide-action]",
+      ) as HTMLElement | null;
+      if (guideTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        const action = guideTarget.dataset.guideAction;
+        if (isEmptyGuideEntryId(action)) runEmptyGuideAction(action);
+        return;
+      }
+
       // Jump to the page cited by an inline page anchor
       const pageAnchorTarget = (e.target as Element | null)?.closest(
         ".llm-page-anchor",
@@ -8958,6 +9937,51 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
         return;
       }
 
+      // Show / hide the word diff of a polishing answer
+      const diffTarget = (e.target as Element | null)?.closest(
+        ".llm-msg-diff-btn",
+      ) as HTMLButtonElement | null;
+      if (diffTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        const labels = getPanelI18n();
+        const panel = diffTarget
+          .closest(".llm-message-wrapper")
+          ?.querySelector(".llm-polish-diff") as HTMLDivElement | null;
+        if (!panel) return;
+        if (!panel.hidden) {
+          panel.hidden = true;
+          diffTarget.title = labels.showPolishingDiff;
+          diffTarget.setAttribute("aria-label", labels.showPolishingDiff);
+          diffTarget.setAttribute("aria-expanded", "false");
+          return;
+        }
+        // The diff is computed the first time it is asked for: an LCS over two
+        // paragraphs is cheap, but not on every re-render of the whole chat.
+        if (!panel.dataset.diffRendered) {
+          const msgIndex = Number(diffTarget.dataset.msgIndex || "");
+          if (!item || !Number.isFinite(msgIndex)) return;
+          const history = chatHistory.get(getConversationKey(item)) || [];
+          const message = history[msgIndex];
+          const original = resolvePolishingOriginalText(history, msgIndex);
+          const revised = message
+            ? splitPolishingAnswer(message.text).revised
+            : "";
+          if (!renderPolishingDiff(panel, original, revised)) {
+            if (status) {
+              setStatus(status, labels.polishingDiffUnavailable, "warning");
+            }
+            return;
+          }
+          panel.dataset.diffRendered = "true";
+        }
+        panel.hidden = false;
+        diffTarget.title = labels.hidePolishingDiff;
+        diffTarget.setAttribute("aria-label", labels.hidePolishingDiff);
+        diffTarget.setAttribute("aria-expanded", "true");
+        return;
+      }
+
       // Save single message as note
       const noteTarget = (e.target as Element | null)?.closest(
         ".llm-msg-note-btn",
@@ -8975,22 +9999,25 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           msg.modelName?.trim() || (msg.role === "user" ? "user" : "model");
         void (async () => {
           try {
-            const noteTags =
-              msg.role === "assistant"
-                ? resolveAssistantNoteTags(msg.text)
-                : undefined;
+            const isAssistant = msg.role === "assistant";
+            const noteTags = isAssistant
+              ? resolveAssistantNoteTags(msg.text)
+              : undefined;
+            const noteText = isAssistant
+              ? prepareAssistantNoteMarkdown(msg.text)
+              : msg.text;
             if (isGlobalPortalItem(item)) {
               const libraryID = getCurrentLibraryID();
               await createStandaloneNoteFromChatHistory(
                 libraryID,
-                [msg],
+                [{ ...msg, text: noteText }],
                 { item },
                 noteTags,
               );
             } else {
               await createNoteFromAssistantText(
                 item,
-                msg.text,
+                noteText,
                 modelName,
                 noteTags,
               );
@@ -9091,6 +10118,9 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
       ) as HTMLDivElement[];
       const slashMenus = Array.from(
         doc.querySelectorAll("#llm-slash-menu"),
+      ) as HTMLDivElement[];
+      const readingMenus = Array.from(
+        doc.querySelectorAll("#llm-reading-menu"),
       ) as HTMLDivElement[];
       const historyMenus = Array.from(
         doc.querySelectorAll("#llm-history-menu"),
@@ -9195,6 +10225,27 @@ export function setupHandlers(body: Element, initialItem?: Zotero.Item | null) {
           if (target && slashButtonEl?.contains(target)) continue;
           slashMenuEl.style.display = "none";
           slashButtonEl?.setAttribute("aria-expanded", "false");
+        }
+
+        for (const readingMenuEl of readingMenus) {
+          if (!isFloatingMenuOpen(readingMenuEl)) continue;
+          if (target && readingMenuEl.contains(target)) continue;
+          const panelRoot = readingMenuEl.closest("#llm-main");
+          const readingButtonEl = panelRoot?.querySelector(
+            "#llm-reading-actions",
+          ) as HTMLButtonElement | null;
+          if (target && readingButtonEl?.contains(target)) continue;
+          setFloatingMenuOpen(readingMenuEl, READING_MENU_OPEN_CLASS, false);
+          readingButtonEl?.setAttribute("aria-expanded", "false");
+          const polishSubmenuEl = readingMenuEl.querySelector(
+            "#llm-reading-polish-submenu",
+          ) as HTMLDivElement | null;
+          if (polishSubmenuEl) polishSubmenuEl.hidden = true;
+          (
+            panelRoot?.querySelector(
+              "#llm-reading-polish-toggle",
+            ) as HTMLButtonElement | null
+          )?.setAttribute("aria-expanded", "false");
         }
 
         for (const figureMenuEl of figureMenus) {

@@ -2251,15 +2251,168 @@ export function migrateLegacyGeminiOAuthState(): void {
     const normalized = value.trim().toLowerCase();
     return normalized === LEGACY_PROVIDER_ID || normalized === "gemini";
   };
-  for (const [providerKey, modelKey] of [
-    ["lastUsedModelProvider", "lastUsedModelName"],
-    ["lastUsedModelProvider.translate", "lastUsedModelName.translate"],
-    ["selectionTranslate.provider", "selectionTranslate.model"],
-    ["authorProfiles.provider", "authorProfiles.model"],
-  ]) {
+  for (const [providerKey, modelKey] of MODEL_PROVIDER_PREF_PAIRS) {
     if (!isLegacyProviderRef(getOAuthPref(providerKey))) continue;
     setOAuthPref(providerKey, "");
     setOAuthPref(modelKey, "");
+  }
+}
+
+/**
+ * The (provider, model) pref pairs that remember a model the user picked.
+ * Each feature keeps its own pair so the chat tab, the translate tab, the
+ * selection popup and the author profiles can sit on different models.
+ */
+const MODEL_PROVIDER_PREF_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["lastUsedModelProvider", "lastUsedModelName"],
+  ["lastUsedModelProvider.translate", "lastUsedModelName.translate"],
+  ["selectionTranslate.provider", "selectionTranslate.model"],
+  ["authorProfiles.provider", "authorProfiles.model"],
+];
+
+/** The four profile slots, as (apiBase, apiKey, model) pref key triples. */
+const PROFILE_SLOT_PREF_KEYS: ReadonlyArray<readonly [string, string, string]> =
+  [
+    ["apiBase", "apiKey", "model"],
+    ["apiBasePrimary", "apiKeyPrimary", "modelPrimary"],
+    ["apiBaseSecondary", "apiKeySecondary", "modelSecondary"],
+    ["apiBaseTertiary", "apiKeyTertiary", "modelTertiary"],
+    ["apiBaseQuaternary", "apiKeyQuaternary", "modelQuaternary"],
+  ];
+
+/**
+ * Read one of the provider-keyed cache prefs as a plain object.
+ * Returns null when the pref is empty or malformed, so callers leave a cache
+ * they cannot understand untouched rather than overwriting it.
+ */
+function readProviderKeyedPref(key: string): Record<string, unknown> | null {
+  const raw = getOAuthPref(key).trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether `provider`'s cached model list still contains `modelName`. */
+function providerServesModel(
+  cache: Record<string, unknown>,
+  provider: string,
+  modelName: string,
+): boolean {
+  const models = cache[provider];
+  if (!Array.isArray(models)) return false;
+  const wanted = modelName.trim().toLowerCase();
+  if (!wanted) return false;
+  return models.some(
+    (row) =>
+      String((row as { id?: unknown })?.id || "")
+        .trim()
+        .toLowerCase() === wanted,
+  );
+}
+
+/** The first provider other than `skipProvider` whose cache serves `modelName`. */
+function findProviderServingModel(
+  cache: Record<string, unknown>,
+  modelName: string,
+  skipProvider?: string,
+): string | null {
+  for (const provider of Object.keys(cache)) {
+    if (provider === skipProvider) continue;
+    if (providerServesModel(cache, provider, modelName)) return provider;
+  }
+  return null;
+}
+
+/**
+ * Forget every setting that still names `provider` once its authorization has
+ * been removed.
+ *
+ * Deleting the credential alone is not enough: the model caches keep an entry
+ * for the provider and the "last used model" prefs keep its id, so the next
+ * request is still resolved against a login that no longer exists. Switching
+ * from an OAuth login to a plain API key is exactly this path.
+ *
+ * A remembered model name survives whenever another provider still serves it —
+ * only the dead provider id is dropped, so a user who kept the same model name
+ * on a new endpoint keeps their selection.
+ */
+export function clearOAuthProviderReferences(provider: OAuthProviderId): void {
+  const modelCache = readProviderKeyedPref("oauthModelListCache");
+
+  for (const cacheKey of ["oauthModelListCache", "oauthModelSelectionCache"]) {
+    const parsed = readProviderKeyedPref(cacheKey);
+    if (!parsed || !(provider in parsed)) continue;
+    delete parsed[provider];
+    setOAuthPref(cacheKey, JSON.stringify(parsed));
+  }
+
+  for (const [providerKey, modelKey] of MODEL_PROVIDER_PREF_PAIRS) {
+    if (markerToProvider(getOAuthPref(providerKey)) !== provider) continue;
+    const modelName = getOAuthPref(modelKey).trim();
+    const survivor = modelCache
+      ? findProviderServingModel(modelCache, modelName, provider)
+      : null;
+    setOAuthPref(providerKey, survivor || "");
+    if (!survivor) setOAuthPref(modelKey, "");
+  }
+
+  const marker = providerToMarker(provider);
+  for (const [apiBaseKey, apiKeyKey, modelKey] of PROFILE_SLOT_PREF_KEYS) {
+    if (getOAuthPref(apiBaseKey).trim() !== marker) continue;
+    setOAuthPref(apiBaseKey, "");
+    setOAuthPref(apiKeyKey, "");
+    setOAuthPref(modelKey, "");
+  }
+}
+
+/**
+ * Repair "last used model" prefs whose OAuth provider id no longer owns the
+ * model they are paired with, and drop OAuth providers left in the model cache
+ * with no models at all.
+ *
+ * Installs that switched from an OAuth login to an API key before
+ * `clearOAuthProviderReferences` existed still carry pairs like
+ * provider="openai-codex" / model="gpt-5.6-sol": the model now comes from a
+ * custom endpoint, so every provider-exact lookup misses and the resolvers fall
+ * through to name-only matching — which picks the wrong endpoint as soon as two
+ * providers serve the same model name.
+ *
+ * Only ids of known OAuth providers are touched. A custom endpoint label is
+ * left exactly as the user's settings wrote it.
+ */
+export function repairStaleModelProviderRefs(): void {
+  const cache = readProviderKeyedPref("oauthModelListCache");
+  if (!cache) return;
+
+  let cacheChanged = false;
+  for (const provider of Object.keys(cache)) {
+    if (!markerToProvider(provider)) continue;
+    const models = cache[provider];
+    if (Array.isArray(models) && models.length === 0) {
+      delete cache[provider];
+      cacheChanged = true;
+    }
+  }
+  if (cacheChanged) {
+    setOAuthPref("oauthModelListCache", JSON.stringify(cache));
+  }
+
+  for (const [providerKey, modelKey] of MODEL_PROVIDER_PREF_PAIRS) {
+    const storedProvider = markerToProvider(getOAuthPref(providerKey));
+    if (!storedProvider) continue;
+    const modelName = getOAuthPref(modelKey).trim();
+    if (!modelName) continue;
+    if (providerServesModel(cache, storedProvider, modelName)) continue;
+    setOAuthPref(
+      providerKey,
+      findProviderServingModel(cache, modelName, storedProvider) || "",
+    );
   }
 }
 
@@ -3336,6 +3489,7 @@ export async function removeProviderOAuthCredential(
   if (provider === "github-copilot") {
     setOAuthPref("oauthCopilotGithubToken", "");
     setOAuthPref("oauthCopilotApiToken", "");
+    clearOAuthProviderReferences(provider);
     return {
       ok: true,
       message: `${getProviderLabel(provider)} authorization removed`,
@@ -3350,6 +3504,10 @@ export async function removeProviderOAuthCredential(
   for (const path of paths) {
     if (removeFileIfExists(path)) removed += 1;
   }
+  // Drop the settings that name this provider even when no credential file was
+  // found: the user asked to stop using it, and a stale provider id left behind
+  // keeps resolving later requests against a login that is gone.
+  clearOAuthProviderReferences(provider);
   return {
     ok: true,
     message:

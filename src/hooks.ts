@@ -13,6 +13,11 @@ import {
   removeLibraryPanel,
 } from "./modules/contextPanel/libraryPanel";
 import { migrateLegacyAdvancedModelParamPrefs } from "./modules/contextPanel/prefHelpers";
+import {
+  registerGlobalHotkeys,
+  shutdownGlobalHotkeys,
+  unregisterGlobalHotkeys,
+} from "./modules/contextPanel/globalHotkeys";
 import { removeReaderPanels } from "./modules/contextPanel/readerPanel";
 import { initChatStore } from "./utils/chatStore";
 import { initMemoryStore } from "./utils/memoryStore";
@@ -28,6 +33,7 @@ import { createZToolkit } from "./utils/ztoolkit";
 import {
   ensureZoteroProxyFromSystem,
   migrateLegacyGeminiOAuthState,
+  repairStaleModelProviderRefs,
 } from "./utils/oauthCli";
 import { maybeShowOpenAIUpdateNotice } from "./modules/updateNotice";
 import {
@@ -70,6 +76,14 @@ async function onStartup() {
     migrateLegacyGeminiOAuthState();
   } catch (err) {
     ztoolkit.log("LLM: Failed to migrate legacy Gemini OAuth state", err);
+  }
+
+  // Re-point "last used model" prefs whose OAuth provider id no longer owns the
+  // model — the residue of switching an OAuth login out for an API key.
+  try {
+    repairStaleModelProviderRefs();
+  } catch (err) {
+    ztoolkit.log("LLM: Failed to repair stale model provider refs", err);
   }
 
   // Clear the never-user-visible factory temperature/maxTokens pair.
@@ -155,6 +169,10 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   registerLLMStyles(win);
   registerReaderContextPanel();
   registerReaderSelectionTracking();
+  // Reader tabs run in their own content browser, so the toolkit's keyboard
+  // manager — not a window listener — is what makes these shortcuts reachable
+  // while reading. It is per-window, so this registers per window too.
+  registerGlobalHotkeys(win, windowToolkit);
   await injectLibraryPanel(win);
 
   win.setTimeout(() => {
@@ -184,6 +202,7 @@ function registerPrefsPane() {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+  unregisterGlobalHotkeys(win);
   unregisterOAuthEnvUpdateSchedulerWindow(win);
   // Kill any translation still running from this window's UI before its
   // panel DOM (and the session that references it) disappears.
@@ -236,6 +255,7 @@ function onShutdown(): void {
   } catch (err) {
     ztoolkit.log("LLM: failed to enumerate main windows on shutdown", err);
   }
+  shutdownGlobalHotkeys();
   unregisterReaderSelectionTracking();
   unregisterReaderContextPanel();
   try {

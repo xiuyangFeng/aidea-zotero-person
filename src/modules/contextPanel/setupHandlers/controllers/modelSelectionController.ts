@@ -268,6 +268,14 @@ export function getSelectedModelInfo(itemId: number | null) {
       selectedModelCache.set(itemId, byPersisted.model);
       if (byPersisted.providerId) {
         selectedModelProviderCache.set(itemId, byPersisted.providerId);
+        // The remembered provider goes stale when a login is removed while its
+        // model keeps being served elsewhere (an OAuth account swapped for an
+        // API key, say). The name-only lookup above already found the real
+        // owner — write it back, or every later provider-exact lookup keeps
+        // missing and falling through to guesswork.
+        if (byPersisted.providerId !== persistedProvider) {
+          persistModelProvider(byPersisted.providerId);
+        }
       }
       return buildResult(byPersisted);
     }

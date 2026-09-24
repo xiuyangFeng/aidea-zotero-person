@@ -21,11 +21,78 @@ import {
 import type { Message } from "./types";
 import { getPanelLang, type PanelLang } from "./i18n";
 import { stripSuggestedQuestions } from "../../utils/suggestedQuestions";
+import {
+  READING_CARD_NOTE_TAG,
+  isReadingCardText,
+} from "../../utils/readingCard";
+import {
+  CRITICAL_REVIEW_NOTE_TAG,
+  isCriticalReviewText,
+} from "../../utils/criticalReview";
+import {
+  HIGHLIGHT_DIGEST_NOTE_TAG,
+  isHighlightDigestText,
+} from "../../utils/highlightDigest";
+import {
+  SYNTHESIS_MATRIX_NOTE_TAG,
+  SYNTHESIS_MATRIX_TITLE,
+  formatSynthesisMatrixNote,
+  isSynthesisMatrixText,
+  parseSynthesisMatrix,
+  resolveSynthesisMatrixLang,
+} from "../../utils/synthesisMatrix";
 
 /** Extra Zotero tags a caller wants on the note it is about to write. */
 export type NoteWriteOptions = {
   tags?: readonly string[];
 };
+
+/**
+ * Tag options for saving an answer as a note.
+ *
+ * Only answers a built-in action asked for are tagged, so each tag keeps
+ * meaning exactly one kind of document and a Zotero saved search on it stays
+ * clean. Recognition is content-based: every one of these actions forces a
+ * fixed first-line title in its prompt, and the recognisers in `src/utils`
+ * read that line back. A per-message flag would need a chat-store migration
+ * for something the answer already states about itself.
+ *
+ * The order is only a tie-breaker for an answer that somehow opens with two
+ * titles; in practice the titles are disjoint.
+ */
+export function resolveAssistantNoteTags(
+  text: string,
+): { tags: string[] } | undefined {
+  if (isReadingCardText(text)) return { tags: [READING_CARD_NOTE_TAG] };
+  if (isCriticalReviewText(text)) return { tags: [CRITICAL_REVIEW_NOTE_TAG] };
+  if (isSynthesisMatrixText(text)) return { tags: [SYNTHESIS_MATRIX_NOTE_TAG] };
+  if (isHighlightDigestText(text)) return { tags: [HIGHLIGHT_DIGEST_NOTE_TAG] };
+  return undefined;
+}
+
+/**
+ * The markdown an assistant answer should be written into a note as.
+ *
+ * Almost always the answer verbatim. A comparison matrix is the exception: its
+ * table is the whole point of the answer, so it is re-emitted through
+ * `formatSynthesisMatrixNote`, which normalises the column widths and restates
+ * the title above it. A matrix the parser cannot read — a model that answered
+ * in prose — falls back to the answer as written rather than to an empty note.
+ */
+export function prepareAssistantNoteMarkdown(text: string): string {
+  const source = typeof text === "string" ? text : "";
+  if (!isSynthesisMatrixText(source)) return source;
+  try {
+    const parsed = parseSynthesisMatrix(source);
+    if (!parsed.headers.length || !parsed.rows.length) return source;
+    return formatSynthesisMatrixNote(parsed, {
+      title: SYNTHESIS_MATRIX_TITLE[resolveSynthesisMatrixLang(getPanelLang())],
+    });
+  } catch (err) {
+    ztoolkit.log("LLM: synthesis matrix note formatting failed", err);
+    return source;
+  }
+}
 
 /**
  * Attach the caller's tags to a note item.

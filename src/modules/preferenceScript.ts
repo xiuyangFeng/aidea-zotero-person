@@ -97,6 +97,21 @@ import {
   getModelChoices,
   pickBestDefaultModel,
 } from "./contextPanel/setupHandlers/controllers/modelSelectionController";
+import {
+  COMMON_LOCAL_ENDPOINTS,
+  discoverLocalLlmServices,
+  type DiscoveredLocalService,
+} from "../utils/localLlmDiscovery";
+import { SETTINGS_I18N_LAYOUT_OVERRIDES } from "./preferences/i18n";
+import { getAccelLabel } from "./preferences/hotkeys";
+import { formatScannedPorts } from "./preferences/localDiscovery";
+import {
+  createHotkeyFieldsCard,
+  createLocalDiscoveryCard,
+  createSettingsSection,
+  createSettingsSectionNav,
+  type SettingsSection,
+} from "./preferences/settingsSections";
 
 type PrefKey =
   | "apiBase"
@@ -163,6 +178,9 @@ type PrefKey =
   | "readingCard.researchFocus"
   | "writingExport.citationStyle"
   | "autoBriefing.mode"
+  | "hotkeys.focusComposer"
+  | "hotkeys.askSelection"
+  | "hotkeys.translateSelection"
   | "uiLanguage";
 
 type Lang = PanelLang;
@@ -2623,6 +2641,8 @@ const tt = (l: Lang): Dict =>
     ...(SETTINGS_I18N_CONCEPT_CARD_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_WRITING_EXPORT_OVERRIDES["en-US"] || {}),
     ...(SETTINGS_I18N_WRITING_EXPORT_OVERRIDES[l] || {}),
+    ...(SETTINGS_I18N_LAYOUT_OVERRIDES["en-US"] || {}),
+    ...(SETTINGS_I18N_LAYOUT_OVERRIDES[l] || {}),
     ...(SETTINGS_I18N_RUNTIME_OVERRIDES[l] || {}),
   }) as Dict;
 
@@ -3106,30 +3126,30 @@ export async function bootstrapSettingTab(
   scrollContainer.appendChild(root);
   applyPanelLanguageAttributes(doc, lang);
 
-  type SettingsSectionId =
-    | "basic"
-    | "connectionMode"
-    | "models"
-    | "selectionTranslate"
-    | "advanced"
-    | "console"
-    | "accounts";
-  const settingsSectionIds: SettingsSectionId[] = [
-    "basic",
-    "connectionMode",
-    "models",
-    "selectionTranslate",
-    "advanced",
-    "console",
-    "accounts",
-  ];
-  const defaultSectionState = settingsSectionIds.reduce(
-    (acc, id) => {
-      acc[id] = id !== "basic";
-      return acc;
-    },
-    {} as Record<SettingsSectionId, boolean>,
-  );
+  // Top-level sections (in render order) plus the cards nested inside them.
+  // Values are the *collapsed* default; a stored `settingsSectionState` wins.
+  // The legacy "advanced" key is simply no longer read — its controls now live
+  // in the reading/selection sections.
+  const SETTINGS_SECTION_DEFAULT_COLLAPSED = {
+    connection: false,
+    reading: false,
+    selection: false,
+    hotkeys: false,
+    basic: false,
+    authorProfiles: true,
+    console: true,
+    connectionMode: false,
+    models: true,
+    accounts: true,
+    selectionTranslate: false,
+  };
+  type SettingsSectionId = keyof typeof SETTINGS_SECTION_DEFAULT_COLLAPSED;
+  const settingsSectionIds = Object.keys(
+    SETTINGS_SECTION_DEFAULT_COLLAPSED,
+  ) as SettingsSectionId[];
+  const defaultSectionState: Record<SettingsSectionId, boolean> = {
+    ...SETTINGS_SECTION_DEFAULT_COLLAPSED,
+  };
   const readSectionState = (): Record<SettingsSectionId, boolean> => {
     const state = { ...defaultSectionState };
     const raw = getPref("settingsSectionState").trim();
@@ -3193,22 +3213,156 @@ export async function bootstrapSettingTab(
     }, 150);
   });
 
+  // ── Section shells + sticky section navigation ──
+  // Every top-level card now lives inside one of these sections. The shells are
+  // built up-front so the controls further down can be appended straight into
+  // the section they belong to, and so `renderStaticText` can label them.
+  const SETTINGS_SECTION_LAYOUT: Array<{
+    id: SettingsSectionId;
+    labelKey: string;
+  }> = [
+    { id: "connection", labelKey: "sectionConnection" },
+    { id: "reading", labelKey: "sectionReading" },
+    { id: "selection", labelKey: "sectionSelection" },
+    { id: "hotkeys", labelKey: "sectionHotkeys" },
+    { id: "basic", labelKey: "sectionAppearance" },
+    { id: "authorProfiles", labelKey: "sectionAuthorProfiles" },
+    { id: "console", labelKey: "sectionConsole" },
+  ];
+  const sectionShells = new Map<SettingsSectionId, SettingsSection>();
+  for (const entry of SETTINGS_SECTION_LAYOUT) {
+    const section = createSettingsSection(
+      doc,
+      `${config.addonRef}-settings-section-${entry.id}`,
+    );
+    section.wrapper.dataset.sectionId = entry.id;
+    applyCollapsibleState(section.head, section.body, entry.id);
+    sectionShells.set(entry.id, section);
+  }
+  const sectionBodyOf = (id: SettingsSectionId): HTMLElement => {
+    const section = sectionShells.get(id);
+    if (!section) throw new Error(`Unknown settings section: ${id}`);
+    return section.body;
+  };
+  const settingsNav = createSettingsSectionNav({
+    doc,
+    scrollContainer,
+    entries: SETTINGS_SECTION_LAYOUT.map((entry) => ({
+      id: entry.id,
+      section: sectionShells.get(entry.id)!.wrapper,
+    })),
+    // Jumping to a collapsed section would scroll to an empty header, so open
+    // it first.
+    onNavigate: (id) => {
+      const section = sectionShells.get(id as SettingsSectionId);
+      if (!section || section.head.dataset.collapsed !== "true") return;
+      setCollapsibleState(
+        section.head,
+        section.body,
+        id as SettingsSectionId,
+        false,
+      );
+      saveSectionState();
+    },
+  });
+  for (const entry of SETTINGS_SECTION_LAYOUT) {
+    const section = sectionShells.get(entry.id)!;
+    section.head.addEventListener("click", () => {
+      toggleCollapsibleState(section.head, section.body, entry.id);
+      settingsNav.syncActive();
+    });
+  }
+  const renderSectionTitles = () => {
+    settingsNav.setAriaLabel(L.settingsNavLabel);
+    for (const entry of SETTINGS_SECTION_LAYOUT) {
+      const title = L[entry.labelKey] || entry.id;
+      sectionShells.get(entry.id)?.setTitle(title);
+      settingsNav.setChipLabel(entry.id, title);
+    }
+  };
+
+  // ── Keyboard shortcuts ──
+  // The bindings themselves are installed by the panel/hooks layer; here we only
+  // persist the accelerator strings. Placeholders and the "clear to reset"
+  // value are read from the packaged defaults so this file never has to be kept
+  // in sync with addon/prefs.js; the literals below are a last-resort fallback.
+  const readPackagedDefault = (key: PrefKey, fallback: string): string => {
+    try {
+      const branch = (
+        Services as unknown as {
+          prefs?: {
+            getDefaultBranch?: (root: string) => {
+              getStringPref?: (name: string) => string;
+            };
+          };
+        }
+      )?.prefs?.getDefaultBranch?.(`${config.prefsPrefix}.`);
+      const value = branch?.getStringPref?.(key);
+      if (typeof value === "string" && value.trim()) return value.trim();
+    } catch {
+      /* pref not registered yet, or not a string — use the literal */
+    }
+    return fallback;
+  };
+  const HOTKEY_FIELDS: Array<{
+    id: string;
+    prefKey: PrefKey;
+    labelKey: string;
+    fallback: string;
+  }> = [
+    {
+      id: "focus-composer",
+      prefKey: "hotkeys.focusComposer",
+      labelKey: "hotkeysFocusComposer",
+      fallback: "accel+shift+m",
+    },
+    {
+      id: "ask-selection",
+      prefKey: "hotkeys.askSelection",
+      labelKey: "hotkeysAskSelection",
+      fallback: "accel+shift+e",
+    },
+    {
+      id: "translate-selection",
+      prefKey: "hotkeys.translateSelection",
+      labelKey: "hotkeysTranslateSelection",
+      fallback: "accel+shift+d",
+    },
+  ];
+  const isMacPlatform = (() => {
+    try {
+      const flag = (Zotero as unknown as { isMac?: boolean })?.isMac;
+      if (typeof flag === "boolean") return flag;
+    } catch {
+      /* fall through to the navigator sniff */
+    }
+    return /mac/i.test(String(win.navigator?.platform || ""));
+  })();
+  const hotkeyDefaultOf = (key: PrefKey): string => {
+    const field = HOTKEY_FIELDS.find((entry) => entry.prefKey === key);
+    return readPackagedDefault(key, field?.fallback || "");
+  };
+  const hotkeysCard = createHotkeyFieldsCard({
+    doc,
+    idPrefix: `${config.addonRef}-hotkey`,
+    accelLabel: getAccelLabel(isMacPlatform ? "darwin" : "win32"),
+    getText: (key) => L[key] || "",
+    fields: HOTKEY_FIELDS.map((field) => ({
+      id: field.id,
+      labelKey: field.labelKey,
+      defaultValue: readPackagedDefault(field.prefKey, field.fallback),
+      read: () => getPref(field.prefKey),
+      write: (value: string) => setPref(field.prefKey, value),
+    })),
+  });
+
   // ── ① Language dropdown + danger buttons toolbar ──
   const basicBox = createEl(doc, "div", "llm-set-card");
-  const basicTitle = createEl(
-    doc,
-    "div",
-    "llm-set-title llm-set-collapsible-toggle",
-  );
   const basicBody = createEl(
     doc,
     "div",
     "llm-set-collapsible-body llm-basic-settings-body",
   );
-  applyCollapsibleState(basicTitle, basicBody, "basic");
-  basicTitle.addEventListener("click", () => {
-    toggleCollapsibleState(basicTitle, basicBody, "basic");
-  });
 
   const langBox = createEl(doc, "div", "llm-basic-settings-grid");
   const basicTopRow = createEl(doc, "div", "llm-basic-top-row");
@@ -4399,22 +4553,10 @@ export async function bootstrapSettingTab(
   );
   consoleIssueHelp.append(consoleIssueBtn, consoleIssueSentence);
 
-  // Console area — collapsible, collapsed by default
-  const consoleCard = createEl(
-    doc,
-    "div",
-    "llm-set-card llm-set-collapsible-body llm-set-console-body",
-  );
+  // Console area — the "console" section head is its collapsible toggle.
+  const consoleCard = createEl(doc, "div", "llm-set-card llm-set-console-body");
   consoleCard.append(consoleIssueHelp, logsWrap, progressListWrap);
-  const consoleTitle = createEl(
-    doc,
-    "div",
-    "llm-set-title llm-set-collapsible-toggle",
-  );
-  applyCollapsibleState(consoleTitle, consoleCard, "console", "flex");
-  consoleTitle.addEventListener("click", () => {
-    toggleCollapsibleState(consoleTitle, consoleCard, "console", "flex");
-  });
+  const consoleSectionShell = sectionShells.get("console")!;
 
   // ── ② Model Config — tab-bar style OAuth / Custom switcher ──
   const connectionModeBox = createEl(doc, "div", "llm-set-card");
@@ -4767,8 +4909,11 @@ export async function bootstrapSettingTab(
     addModelRow,
     customModeStatus,
   );
-  // Assemble customPanel with the custom fields
-  customPanel.append(customFieldsBox, fetchedModelsBox);
+  // Assemble customPanel with the custom fields. The scanner card is built
+  // later (it needs the fetch-models flow), so reserve its slot here to keep
+  // the visual order: fields → local services → fetched models.
+  const localScanSlot = createEl(doc, "div", "llm-set-local-scan-slot");
+  customPanel.append(customFieldsBox, localScanSlot, fetchedModelsBox);
 
   connectionModeBody.append(
     modeTabBar,
@@ -4934,7 +5079,8 @@ export async function bootstrapSettingTab(
 
   const renderStaticText = () => {
     L = tt(lang);
-    basicTitle.textContent = L.basicConfig;
+    renderSectionTitles();
+    hotkeysCard.renderStaticText();
     langLabel.textContent = L.language;
     composerThemeLabel.textContent = L.composerTheme;
     updateComposerThemeUi();
@@ -4946,7 +5092,6 @@ export async function bootstrapSettingTab(
     fontLabel.textContent = L.fontSize;
     fontOpenBtn.textContent = L.fontSizeOpen;
     if (fontInspector?.isConnected) showFontInspector();
-    consoleTitle.textContent = L.console;
     consoleIssueBtn.title = L.consoleIssueOpen;
     consoleIssueBtn.setAttribute("aria-label", L.consoleIssueOpen);
     consoleIssuePrefix.textContent = L.consoleIssuePrefix;
@@ -4961,7 +5106,6 @@ export async function bootstrapSettingTab(
     modelsTitle.textContent = L.models;
 
     connectionModeTitle.textContent = L.modelConfigTitle;
-    advancedTitle.textContent = L.advanced;
     oauthTabBtn.textContent = L.oauthProvidersMode;
     customTabBtn.textContent = L.customCompatibleMode;
     oauthEnvUpdateModeLabel.textContent = L.oauthEnvUpdateMode;
@@ -4977,6 +5121,7 @@ export async function bootstrapSettingTab(
     customModelInput.placeholder = L.customModelPlaceholder;
     customModelHint.textContent = L.customModelHint;
     fetchModelsBtn.textContent = L.fetchModels;
+    localDiscoveryCard.renderStaticText();
     fetchedModelsLabelText.textContent = L.providerLabel;
     addModelLabel.textContent = L.addModelLabel;
     addModelInput.placeholder = L.addModelPlaceholder;
@@ -5004,6 +5149,14 @@ export async function bootstrapSettingTab(
     if (atl) atl.textContent = L.showAddText;
     const ath = doc.querySelector(`#${config.addonRef}-popup-add-text-hint`);
     if (ath) ath.textContent = L.showAddTextHint;
+    const sqal = doc.querySelector(
+      `#${config.addonRef}-selection-quick-actions-label`,
+    );
+    if (sqal) sqal.textContent = L.selectionQuickActions;
+    const sqah = doc.querySelector(
+      `#${config.addonRef}-selection-quick-actions-hint`,
+    );
+    if (sqah) sqah.textContent = L.selectionQuickActionsHint;
     const pal = doc.querySelector(`#${config.addonRef}-page-anchors-label`);
     if (pal) pal.textContent = L.pageAnchors;
     const pah = doc.querySelector(`#${config.addonRef}-page-anchors-hint`);
@@ -5196,8 +5349,13 @@ export async function bootstrapSettingTab(
 
   const appendProgress = (line: string, color = "#374151") => {
     // Auto-expand console section when progress is appended
-    if (consoleTitle.dataset.collapsed === "true") {
-      setCollapsibleState(consoleTitle, consoleCard, "console", false, "flex");
+    if (consoleSectionShell.head.dataset.collapsed === "true") {
+      setCollapsibleState(
+        consoleSectionShell.head,
+        consoleSectionShell.body,
+        "console",
+        false,
+      );
       saveSectionState();
     }
     const row = createNode(doc, "div", `color:${color};`);
@@ -5263,7 +5421,11 @@ export async function bootstrapSettingTab(
   };
 
   const clearProviderState = (provider: OAuthProviderId) => {
-    const nextCache = { ...cache, [provider]: [] };
+    // Drop the key outright rather than leaving an empty list behind: an empty
+    // entry is still a provider reference, and saving one here would undo the
+    // cleanup removeProviderOAuthCredential() just performed.
+    const nextCache = { ...cache };
+    delete nextCache[provider];
     cache = nextCache;
     saveModelCache(cache);
     const nextSelection = { ...selectionCache };
@@ -6420,6 +6582,11 @@ export async function bootstrapSettingTab(
       "readingCard.researchFocus": "",
       "writingExport.citationStyle": "auto",
       "autoBriefing.mode": "auto",
+      "hotkeys.focusComposer": hotkeyDefaultOf("hotkeys.focusComposer"),
+      "hotkeys.askSelection": hotkeyDefaultOf("hotkeys.askSelection"),
+      "hotkeys.translateSelection": hotkeyDefaultOf(
+        "hotkeys.translateSelection",
+      ),
     };
     for (const [key, value] of Object.entries(defaults)) {
       setPref(key as PrefKey, value);
@@ -6434,6 +6601,7 @@ export async function bootstrapSettingTab(
     setBoolPref("pageAnchors.enabled", true);
     setBoolPref("suggestedQuestions.enabled", true);
     setBoolPref("conceptCards.autoRecall", true);
+    setBoolPref("selectionPopup.quickActions", true);
     setBoolPref("authorProfiles.contextMenuEnabled", false);
     setBoolPref("selectionTranslate.enabled", true);
     setBoolPref("selectionTranslate.auto", true);
@@ -6490,6 +6658,8 @@ export async function bootstrapSettingTab(
     if (readingCardTemplateInput) readingCardTemplateInput.value = "";
     if (readingCardFocusInput) readingCardFocusInput.value = "";
     if (conceptRecallInput) conceptRecallInput.checked = true;
+    if (popupQuickActionsInput) popupQuickActionsInput.checked = true;
+    hotkeysCard.refreshValues();
     writingCitationStyleValue = "auto";
     updateWritingCitationStyleUi();
     autoBriefingModeValue = "auto";
@@ -6523,28 +6693,42 @@ export async function bootstrapSettingTab(
     if (selectionTranslateTargetInput) {
       selectionTranslateTargetInput.dataset.value = "zh-CN";
     }
-    for (const id of settingsSectionIds) sectionState[id] = id !== "basic";
-    setCollapsibleState(basicTitle, basicBody, "basic", false);
+    for (const id of settingsSectionIds) {
+      sectionState[id] = defaultSectionState[id];
+    }
+    for (const entry of SETTINGS_SECTION_LAYOUT) {
+      const section = sectionShells.get(entry.id);
+      if (!section) continue;
+      setCollapsibleState(
+        section.head,
+        section.body,
+        entry.id,
+        defaultSectionState[entry.id],
+      );
+    }
     setCollapsibleState(
       connectionModeTitle,
       connectionModeBody,
       "connectionMode",
-      true,
+      defaultSectionState.connectionMode,
     );
-    setCollapsibleState(modelsTitle, modelsBody, "models", true);
+    setCollapsibleState(
+      modelsTitle,
+      modelsBody,
+      "models",
+      defaultSectionState.models,
+    );
     setCollapsibleState(
       selectionTranslateTitle,
       selectionTranslateBody,
       "selectionTranslate",
-      true,
+      defaultSectionState.selectionTranslate,
     );
-    setCollapsibleState(advancedTitle, advancedBody, "advanced", true);
-    setCollapsibleState(consoleTitle, consoleCard, "console", true, "flex");
     setCollapsibleState(
       accountsTitle,
       accountsTable,
       "accounts",
-      true,
+      defaultSectionState.accounts,
       "block",
     );
     saveSectionState();
@@ -6749,9 +6933,9 @@ export async function bootstrapSettingTab(
     loadExistingProviderModels();
   }
 
-  // ── Fetch Models button handler ──
+  // ── Fetch Models flow — shared by the button and the local-service scanner ──
   let fetchModelsBusy = false;
-  fetchModelsBtn.addEventListener("click", async () => {
+  const runFetchModels = async () => {
     if (fetchModelsBusy) return;
     const apiBase = customApiBaseInput.value.trim().replace(/\/+$/, "");
     if (!apiBase) {
@@ -6816,7 +7000,82 @@ export async function bootstrapSettingTab(
       fetchModelsBtn.disabled = false;
       fetchModelsBtn.textContent = prevText || L.fetchModels;
     }
+  };
+  fetchModelsBtn.addEventListener("click", () => {
+    void runFetchModels();
   });
+
+  // ── Local service auto-discovery ──
+  // Probing localhost is best-effort: a missing fetch or a refused connection
+  // just means "no services found", never an error thrown into the settings UI.
+  const resolveWindowFetch = (): typeof fetch | null => {
+    try {
+      const windowFetch = (win as unknown as { fetch?: typeof fetch }).fetch;
+      if (typeof windowFetch === "function") {
+        return windowFetch.bind(win) as typeof fetch;
+      }
+    } catch {
+      /* fall through to the globals below */
+    }
+    try {
+      const globalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+      if (typeof globalFetch === "function") return globalFetch;
+    } catch {
+      /* fall through to the toolkit global */
+    }
+    try {
+      const toolkitFetch = ztoolkit?.getGlobal?.("fetch");
+      if (typeof toolkitFetch === "function") {
+        return toolkitFetch as typeof fetch;
+      }
+    } catch {
+      /* no fetch available */
+    }
+    return null;
+  };
+
+  const applyDiscoveredService = async (service: DiscoveredLocalService) => {
+    // Fill the primary custom endpoint and drop any stale key, reusing the same
+    // persist helpers the manual fields use so prefs, label and readiness state
+    // all move together.
+    customApiBaseInput.value = service.apiBase;
+    customApiKeyInput.value = "";
+    persistCustomApiKey();
+    persistCustomApiBase();
+    if (service.models.length) {
+      // Show what the probe already told us, so the list is populated even if
+      // the follow-up fetch fails.
+      const oldCheckState = new Map(
+        lastFetchedModels.map((entry) => [entry.id, entry.checked]),
+      );
+      lastFetchedModels = service.models.map((id) => ({
+        id,
+        label: id,
+        checked: oldCheckState.get(id) ?? false,
+      }));
+      renderFetchedModels();
+    }
+    await runFetchModels();
+  };
+
+  const localDiscoveryCard = createLocalDiscoveryCard({
+    doc,
+    idPrefix: config.addonRef,
+    getText: (key) => L[key] || "",
+    scannedPorts: formatScannedPorts(),
+    scan: async () => {
+      const fetchFn = resolveWindowFetch();
+      if (!fetchFn) return [];
+      try {
+        return await discoverLocalLlmServices(COMMON_LOCAL_ENDPOINTS, fetchFn);
+      } catch (err) {
+        ztoolkit?.log?.("AIdea: local service discovery failed", err);
+        return [];
+      }
+    },
+    onSelect: (service) => applyDiscoveredService(service),
+  });
+  localScanSlot.appendChild(localDiscoveryCard.element);
 
   // Declared ahead of the control itself so the first renderStaticText() —
   // which runs before the Advanced fields are built — can already call it.
@@ -6853,17 +7112,12 @@ export async function bootstrapSettingTab(
     });
   };
 
-  const advancedGroup = createEl(doc, "div", "llm-set-card");
-  const advancedTitle = createEl(
-    doc,
-    "div",
-    "llm-set-title llm-set-collapsible-toggle",
-  );
-  const advancedBody = createEl(doc, "div", "llm-set-collapsible-body");
-  applyCollapsibleState(advancedTitle, advancedBody, "advanced");
-  advancedTitle.addEventListener("click", () => {
-    toggleCollapsibleState(advancedTitle, advancedBody, "advanced");
-  });
+  // Cards for the controls that used to sit in the "Advanced" junk drawer.
+  // They are filled in the final assembly block at the end of this function so
+  // the reading order of the settings page is stated in exactly one place.
+  const readingCardBox = createEl(doc, "div", "llm-set-card");
+  const selectionPopupBox = createEl(doc, "div", "llm-set-card");
+  const authorProfilesBox = createEl(doc, "div", "llm-set-card");
 
   renderStaticText();
   renderModels();
@@ -6900,7 +7154,6 @@ export async function bootstrapSettingTab(
     systemPromptInput,
     systemPromptHint,
   );
-  advancedBody.appendChild(systemPromptWrap);
 
   systemPromptInput.value = getPref("systemPrompt") || "";
   systemPromptInput.addEventListener("input", () =>
@@ -6924,7 +7177,6 @@ export async function bootstrapSettingTab(
   const popupHint = createEl(doc, "span", "llm-set-hint", L.showAddTextHint);
   popupHint.id = `${config.addonRef}-popup-add-text-hint`;
   popupAddTextWrap.append(popupAddTextLabel, popupHint);
-  advancedBody.appendChild(popupAddTextWrap);
 
   const prefValue = Zotero.Prefs.get(
     `${config.prefsPrefix}.showPopupAddText`,
@@ -6938,6 +7190,45 @@ export async function bootstrapSettingTab(
       popupInput.checked,
       true,
     );
+  });
+
+  // ── Selection popup quick-action capsule ──
+  // The capsule itself is rendered by the selection-popup module; this is only
+  // the on/off switch for it.
+  const popupQuickActionsWrap = createEl(
+    doc,
+    "div",
+    "llm-set-field llm-set-subsection",
+  );
+  const popupQuickActionsLabel = createEl(doc, "label", "llm-set-radio-label");
+  const popupQuickActionsInput = createEl(
+    doc,
+    "input",
+    "llm-set-checkbox",
+  ) as HTMLInputElement;
+  popupQuickActionsInput.type = "checkbox";
+  popupQuickActionsInput.checked = getBoolPref(
+    "selectionPopup.quickActions",
+    true,
+  );
+  const popupQuickActionsText = createEl(
+    doc,
+    "span",
+    "",
+    L.selectionQuickActions,
+  );
+  popupQuickActionsText.id = `${config.addonRef}-selection-quick-actions-label`;
+  popupQuickActionsLabel.append(popupQuickActionsInput, popupQuickActionsText);
+  const popupQuickActionsHint = createEl(
+    doc,
+    "span",
+    "llm-set-hint",
+    L.selectionQuickActionsHint,
+  );
+  popupQuickActionsHint.id = `${config.addonRef}-selection-quick-actions-hint`;
+  popupQuickActionsWrap.append(popupQuickActionsLabel, popupQuickActionsHint);
+  popupQuickActionsInput.addEventListener("change", () => {
+    setBoolPref("selectionPopup.quickActions", popupQuickActionsInput.checked);
   });
 
   const pageAnchorWrap = createEl(
@@ -6964,7 +7255,6 @@ export async function bootstrapSettingTab(
   );
   pageAnchorHint.id = `${config.addonRef}-page-anchors-hint`;
   pageAnchorWrap.append(pageAnchorLabel, pageAnchorHint);
-  advancedBody.appendChild(pageAnchorWrap);
 
   pageAnchorInput.addEventListener("change", () => {
     setBoolPref("pageAnchors.enabled", pageAnchorInput.checked);
@@ -7012,7 +7302,6 @@ export async function bootstrapSettingTab(
     suggestedQuestionsLabel,
     suggestedQuestionsHint,
   );
-  advancedBody.appendChild(suggestedQuestionsWrap);
 
   suggestedQuestionsInput.addEventListener("change", () => {
     setBoolPref("suggestedQuestions.enabled", suggestedQuestionsInput.checked);
@@ -7044,7 +7333,6 @@ export async function bootstrapSettingTab(
   );
   conceptRecallHint.id = `${config.addonRef}-concept-auto-recall-hint`;
   conceptRecallWrap.append(conceptRecallLabel, conceptRecallHint);
-  advancedBody.appendChild(conceptRecallWrap);
 
   conceptRecallInput.addEventListener("change", () => {
     setBoolPref("conceptCards.autoRecall", conceptRecallInput.checked);
@@ -7094,7 +7382,6 @@ export async function bootstrapSettingTab(
     writingCitationStyleTabBar,
     writingCitationStyleHint,
   );
-  advancedBody.appendChild(writingCitationStyleWrap);
 
   // ── Opening paper briefing ──
   // Three states, not two: "manual" keeps the + menu action without ever
@@ -7140,7 +7427,6 @@ export async function bootstrapSettingTab(
     autoBriefingModeTabBar,
     autoBriefingModeHint,
   );
-  advancedBody.appendChild(autoBriefingModeWrap);
 
   // ── Reading card ──
   // Both fields feed the "+ → Generate reading card" prompt. Empty is the
@@ -7177,7 +7463,6 @@ export async function bootstrapSettingTab(
     readingCardTemplateInput,
     readingCardTemplateHint,
   );
-  advancedBody.appendChild(readingCardWrap);
 
   readingCardTemplateInput.value = getPref("readingCard.template") || "";
   readingCardTemplateInput.addEventListener("input", () =>
@@ -7216,7 +7501,6 @@ export async function bootstrapSettingTab(
     readingCardFocusInput,
     readingCardFocusHint,
   );
-  advancedBody.appendChild(readingCardFocusWrap);
 
   readingCardFocusInput.value = getPref("readingCard.researchFocus") || "";
   readingCardFocusInput.addEventListener("input", () =>
@@ -7332,7 +7616,6 @@ export async function bootstrapSettingTab(
     authorProfilesHint,
     authorProfilesOptionRow,
   );
-  advancedBody.appendChild(authorProfilesWrap);
   authorProfilesMenuInput.addEventListener("change", () => {
     setBoolPref(
       "authorProfiles.contextMenuEnabled",
@@ -7816,30 +8099,60 @@ export async function bootstrapSettingTab(
   const showAllModelsInput = createEl(doc, "input") as HTMLInputElement;
   showAllModelsInput.type = "checkbox";
   showAllModelsWrap.appendChild(showAllModelsInput);
-  advancedBody.appendChild(showAllModelsWrap);
-  advancedGroup.append(advancedTitle, advancedBody);
-
-  // ── Build collapsible console section ──
-  const consoleSection = createEl(doc, "div", "llm-set-card");
-  consoleSection.append(consoleTitle, consoleCard);
 
   // ── Move authCards, accountsBox into OAuth panel ──
   oauthPanel.append(oauthEnvUpdateModeField, authCards, accountsBox);
 
-  // ── Final assembly — optimized section order ──
+  // ── Final assembly ──
+  // Single source of truth for what the settings page contains and in which
+  // order. Every control built above is appended exactly once, here.
+
+  // 连接与模型 / Connection & Models
+  sectionBodyOf("connection").append(connectionModeBox, modelsBox);
+
+  // 阅读助手 / Reading Assistant
+  readingCardBox.append(
+    autoBriefingModeWrap,
+    suggestedQuestionsWrap,
+    pageAnchorWrap,
+    readingCardWrap,
+    readingCardFocusWrap,
+    conceptRecallWrap,
+    writingCitationStyleWrap,
+    systemPromptWrap,
+  );
+  sectionBodyOf("reading").append(readingCardBox);
+
+  // 划词与弹窗 / Selection & Popup
+  selectionPopupBox.append(popupAddTextWrap, popupQuickActionsWrap);
+  sectionBodyOf("selection").append(selectionPopupBox, selectionTranslateGroup);
+
+  // 快捷键 / Keyboard Shortcuts
+  sectionBodyOf("hotkeys").append(hotkeysCard.element);
+
+  // 外观 / Appearance
   basicBody.appendChild(langBox);
-  basicBox.append(basicTitle, basicBody);
-  root.appendChild(basicBox);
-  root.appendChild(connectionModeBox);
-  root.appendChild(modelsBox);
-  root.appendChild(selectionTranslateGroup);
-  root.appendChild(advancedGroup);
-  root.appendChild(consoleSection);
+  basicBox.append(basicBody);
+  sectionBodyOf("basic").append(basicBox);
+
+  // 作者档案（Beta） / Author Profiles (Beta)
+  authorProfilesBox.append(authorProfilesWrap);
+  sectionBodyOf("authorProfiles").append(authorProfilesBox);
+
+  // 控制台 / Console
+  sectionBodyOf("console").append(consoleCard);
+
+  root.appendChild(settingsNav.element);
+  for (const entry of SETTINGS_SECTION_LAYOUT) {
+    root.appendChild(sectionShells.get(entry.id)!.wrapper);
+  }
+  root.appendChild(showAllModelsWrap);
 
   const savedScrollTop = Number(getPref("settingsScrollTop") || "0");
-  if (Number.isFinite(savedScrollTop) && savedScrollTop > 0) {
-    win.setTimeout(() => {
+  win.setTimeout(() => {
+    if (Number.isFinite(savedScrollTop) && savedScrollTop > 0) {
       scrollContainer.scrollTop = Math.max(0, Math.floor(savedScrollTop));
-    }, 0);
-  }
+    }
+    settingsNav.syncActive();
+  }, 0);
 }

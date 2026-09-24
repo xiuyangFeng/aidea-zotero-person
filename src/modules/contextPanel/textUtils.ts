@@ -5,6 +5,7 @@ import {
 } from "./normalizers";
 import type { PaperContextRef, SelectedTextSource } from "./types";
 import { formatPaperCitationLabel } from "./paperAttribution";
+import { routeStatusToNotice } from "./notice";
 export { normalizeSelectedTextSource } from "./normalizers";
 
 export const DEFAULT_SELECTED_TEXT_PROMPT =
@@ -278,6 +279,13 @@ export function getAttachmentTypeLabel(entry: {
   return "FILE";
 }
 
+/**
+ * Update the panel's status line.
+ *
+ * Warnings and errors are also mirrored into the inline notice above the
+ * composer (see `notice.ts`), so every existing call site gets a visible
+ * banner without knowing about it.
+ */
 export function setStatus(
   statusEl: HTMLElement,
   text: string,
@@ -285,6 +293,7 @@ export function setStatus(
 ) {
   statusEl.textContent = text;
   statusEl.className = `llm-status llm-status-${variant}`;
+  routeStatusToNotice(statusEl, text, variant);
 }
 
 export function clampNumber(value: number, min: number, max: number): number {

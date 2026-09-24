@@ -140,6 +140,72 @@ AIdea captures and recalls useful information across conversations to improve co
 - **Prompt injection defense** blocks malicious or irrelevant content from being stored
 - **Fully local storage** keeps memory data inside Zotero's SQLite database
 
+### 🧭 Where Everything Lives
+
+The composer has two menus, so context and actions no longer share one list:
+
+- **`+` menu — add context only**: **Upload files**, **Select references** (or type `@`), **Add selected items** from the library, and **Add my annotations**.
+- **📖 Reading menu — everything that reads the paper for you**, in five groups (arrow keys, Home/End and Esc work inside it):
+
+| Group                  | Actions                                                                                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview**           | Generate paper briefing · Generate reading card · Figure navigator · Find code repositories                                                                                                 |
+| **On the selection**   | Explain in plain language · Break down this sentence · Break down this formula · Walk through this algorithm · Read this results table · Question this passage · Explain selected citations |
+| **Deep dive**          | Critical review (whole document) · Build a comparison matrix · Academic polishing (Academic tone / Conciseness / Clarity / Reviewer response)                                               |
+| **Concepts & writing** | Extract concept cards · Record a concept… · Export glossary · Export writing draft                                                                                                          |
+| **Annotations**        | Summarize my annotations                                                                                                                                                                    |
+
+### 📰 Proactive Reading Assistant
+
+- **Auto briefing**: opening a paper with an empty conversation writes a short briefing by itself. While it is pending, an inline notice offers **Cancel** and **Don't auto-generate**; the mode (auto / manual / off) is in Settings → Reading Assistant.
+- **Guided questions**: the paper briefing ends with a few follow-up questions you can click (toggle in Settings → Reading Assistant).
+- **Page anchors**: `[p.N]` citations in answers are links that jump the reader to that page.
+- **Empty-conversation guide**: a fresh conversation shows one-click starting points (paper briefing, reading card, explain my selection, annotation summary, add library items / references, all reading tools) plus the configured hotkeys.
+- **Inline notices**: warnings, errors and anything you can act on appear in a banner above the composer with action buttons; warnings and errors stay until closed.
+
+### 📖 Reading Actions on the Selection
+
+Select a passage in the reader, then pick an action from the Reading menu or the selection popup:
+
+- **Break down this sentence** — the subject–verb–object backbone, the modifier hierarchy and a plain paraphrase.
+- **Break down this formula** — a symbol-by-symbol table, dimensions, intuition and constraints.
+- **Walk through this algorithm** — steps through the pseudocode on a tiny toy example, tracking variables and shapes.
+- **Read this results table** — which method wins, by how much, and what the ablations say about each component.
+- **Question this passage** — a reviewer's look at assumptions, baselines and missing controls.
+
+### 🔍 Citation Insight and 1-Click Citation Import
+
+Select text containing `[12]` or `(Smith et al., 2020)` and choose **Explain selected citations**: AIdea finds the entries in the paper's reference list and explains why each work is cited. Cited works already in your library are attached as supplemental papers. For the ones that are not, a notice offers **Import to Zotero** (per marker, or **Import all**): metadata comes from **Crossref** (by DOI when the entry has one, else a bibliographic search) with **OpenAlex** as fallback, a DOI/title check prevents duplicates, and the new item is created in the same library as the paper. If Zotero's "automatically attach associated PDFs" option is on, Zotero also looks for an open-access PDF, and a found PDF is attached as context.
+
+### 💻 Paper-to-Code
+
+**Reading menu → Find code repositories** searches the GitHub repository search API for repositories that mention the paper's arXiv id, DOI or exact title, and lists them with stars, language and description; click a row to open it. Requests are anonymous (no token is stored), so GitHub's rate limit applies; hitting it shows a notice with the wait time. Results are repositories that _mention_ the paper, not necessarily the official implementation.
+
+### 🧐 Critical Review and Comparison Matrix
+
+- **Critical review (whole document)** — a "Reviewer 2" report on the open paper; saved notes are tagged `aidea-critical-review`.
+- **Build a comparison matrix** — select two or more papers as context to get a table of research questions, methods, datasets, metrics and limitations; saved notes are tagged `aidea-synthesis-matrix`.
+- **Summarize my annotations** — turns your highlights and comments into a structured digest note tagged `aidea-highlight-digest`.
+
+### ✍️ Academic Polishing
+
+Four modes — **Academic tone**, **Conciseness** (trims 15–30%), **Clarity & coherence** and **Reviewer response** — work on the selected text; the answer has a **word-level diff** you can toggle to see exactly what changed.
+
+### 💊 Selection Popup Quick Actions
+
+The reader's selection popup carries a quick-action capsule next to translation: it recommends the most fitting actions for what you selected (sentence, formula, algorithm, table…) and keeps the rest under **More**. It can be turned off in Settings → Selection & Popup.
+
+### ⌨️ Global Hotkeys
+
+Work in the library pane and in reader tabs, and can be rebound in Settings → Keyboard Shortcuts (`accel` is ⌘ on macOS, Ctrl elsewhere):
+
+| Action                  | Default         |
+| ----------------------- | --------------- |
+| Focus the composer      | `accel+shift+M` |
+| Ask about the selection | `accel+shift+E` |
+| Translate the selection | `accel+shift+D` |
+| Stop a streaming reply  | `Esc`           |
+
 ### 🎨 Rich Rendering
 
 - Full **Markdown** rendering, including headings, lists, code blocks, and tables
@@ -243,7 +309,9 @@ Click shortcut buttons such as **Summarize**, **Explain**, or **Translate** for 
 | **Selection Translation**       | Translate selected reader text with automatic bounded document context | On                                   |
 | **Selection Translation Model** | Dedicated model for reader selection translation                       | First available model unless changed |
 | **Show All Models**             | Show all available models instead of a curated subset                  | Off                                  |
-| **Tab Bar**                     | Show or hide the tab navigation bar                                    | Hidden                               |
+| **Tab Bar**                     | Show or hide the tab navigation bar                                    | Shown                                |
+
+The settings page is split into seven sections with a sticky section bar: **Connection & Models**, **Reading Assistant**, **Selection & Popup**, **Keyboard Shortcuts**, **Appearance**, **Author Profiles (Beta)** and **Console**. In **Connection & Models**, **Scan local services** probes the usual local inference ports (Ollama `11434`, LM Studio `1234`, LocalAI `8080`, vLLM `8000`, TextGen `5000`); click a result to fill in the API Base URL.
 
 ---
 
